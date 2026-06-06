@@ -285,8 +285,10 @@ python -m uvicorn app:app --host 127.0.0.1 --port 7000
 If `python` points at an older interpreter, use `py -3.12` (or another installed
 3.11+ version) for the venv step.
 
-**Requirements:** Python 3.11+. The core app (chat, agent, memory, documents,
-email, calendar, deep research) runs fully native. For full **Cookbook** background
+**Requirements:** Python 3.11+. The core app (chat, agent, memory, vector RAG,
+documents, email, calendar, deep research) runs fully native. ChromaDB stores
+native vector data in `data/chroma` unless you explicitly configure an external
+Chroma service. For full **Cookbook** background
 model downloads and the agent shell tool, also install
 [Git for Windows](https://git-scm.com/download/win) (provides `bash.exe`).
 Local GPU *serving* of vLLM/SGLang needs Linux/WSL2; for a local model on Windows,
@@ -301,10 +303,11 @@ For the experimental Windows Tauri desktop shell, see
 
 ## Troubleshooting & Advanced Setup
 
-### `chromadb-client` conflicts with embedded ChromaDB
-If `chromadb-client` (the lightweight HTTP-only package) is installed alongside the full `chromadb` package, Odysseus starts but ChromaDB silently falls back to HTTP-only mode and fails.
+### Old `chromadb-client` installs conflict with embedded ChromaDB
+If an older native venv still has `chromadb-client` (the lightweight HTTP-only
+package), Odysseus cannot use embedded ChromaDB. The Windows launcher removes
+it automatically; manual installs can fix it with:
 
-**Fix:** uninstall `chromadb-client` and force-reinstall the full package:
 ```bash
 ./venv/bin/pip uninstall chromadb-client -y
 ./venv/bin/pip install --force-reinstall chromadb
@@ -394,8 +397,8 @@ Key settings:
 | `LOCALHOST_BYPASS` | `false` | Development-only auth bypass for loopback requests. Keep false for shared/network deployments. |
 | `SECURE_COOKIES` | `false` | Set true when serving Odysseus through HTTPS at a trusted proxy or private access gateway. |
 | `DATABASE_URL` | `sqlite:///./data/app.db` | Database connection string |
-| `CHROMADB_HOST` | `localhost` | ChromaDB host for vector memory. Docker overrides this to `chromadb`. |
-| `CHROMADB_PORT` | `8100` | ChromaDB port for manual host runs. Docker overrides this to `8000`. |
+| `CHROMADB_HOST` | unset | Optional external ChromaDB host. When unset with `CHROMADB_PORT`, native installs use embedded `data/chroma`; Docker overrides this to `chromadb`. |
+| `CHROMADB_PORT` | unset | Optional external ChromaDB port. When unset with `CHROMADB_HOST`, native installs use embedded `data/chroma`; Docker overrides this to `8000`. |
 | `EMBEDDING_URL` | -- | OpenAI-compatible embeddings endpoint |
 
 ### Built-in MCP servers (optional setup)

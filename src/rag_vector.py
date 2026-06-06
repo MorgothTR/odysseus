@@ -48,6 +48,16 @@ def _generate_doc_id(text: str, owner: str = "") -> str:
     return f"doc_{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
 
 
+def _path_match_key(path: str) -> str:
+    return os.path.normcase(str(path)).replace("\\", "/").rstrip("/")
+
+
+def _path_is_same_or_child(source: str, directory: str) -> bool:
+    source_key = _path_match_key(source)
+    directory_key = _path_match_key(directory)
+    return source_key == directory_key or source_key.startswith(directory_key + "/")
+
+
 class VectorRAG:
     """RAG system using ChromaDB vector storage with hybrid search."""
 
@@ -464,14 +474,18 @@ class VectorRAG:
         targets document content / list membership, not a ``source`` substring),
         and a plain substring would over-delete siblings — removing ``/docs``
         must not touch ``/docs2`` or ``/docs_personal``. We therefore match
-        ``source == directory`` or ``source`` startswith ``directory + os.sep``,
-        the same boundary rule add_directory uses for exclusions. ``directory``
-        is abspath-normalized so it matches the absolute ``source`` that indexing
-        always stores, regardless of how the caller passed it in.
+        ``source == directory`` or ``source`` startswith the directory plus a
+        path separator, the same boundary rule add_directory uses for
+        exclusions. Comparisons normalize slash direction so tests and stored
+        paths behave consistently on Windows and POSIX.
         """
         if not self.healthy:
             return {"success": False, "message": "Collection not initialized"}
-        directory = os.path.abspath(directory)
+        raw_directory = str(directory)
+        directory = os.path.abspath(raw_directory)
+        match_directories = [directory]
+        if _path_match_key(raw_directory) != _path_match_key(directory):
+            match_directories.append(raw_directory)
         try:
             removed_ids = set()
             for _lane_name, collection in self._collections_for_delete():
@@ -481,7 +495,7 @@ class VectorRAG:
                     for i, m in enumerate(results["metadatas"])
                     if isinstance(m, dict)
                     and isinstance(m.get("source"), str)
-                    and (m["source"] == directory or m["source"].startswith(directory + os.sep))
+                    and any(_path_is_same_or_child(m["source"], d) for d in match_directories)
                 ]
                 if ids:
                     collection.delete(ids=ids)

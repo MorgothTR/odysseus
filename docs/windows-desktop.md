@@ -1,6 +1,6 @@
 # Windows Desktop Wrapper
 
-This is the Phase 1 Tauri desktop shell for Odysseus on Windows. It does not
+This is the Tauri desktop shell for Odysseus on Windows. It does not
 bundle Python, change Docker support, or rebuild the frontend. It opens the
 existing Odysseus UI from `http://127.0.0.1:7000`.
 
@@ -31,6 +31,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\launch-windows.ps1 -De
 When the desktop shell starts the backend, closing the desktop window stops only
 that backend process tree.
 
+## Native Vector Storage
+
+The desktop/native flow does not require Docker for ChromaDB. Unless
+`CHROMADB_HOST` or `CHROMADB_PORT` is set, vector memory and RAG use embedded
+ChromaDB storage in:
+
+```text
+data/chroma
+```
+
+Set `CHROMADB_HOST` / `CHROMADB_PORT` only when you intentionally want Odysseus
+to use a standalone ChromaDB service.
+
 ## Logs
 
 Desktop startup output is appended to:
@@ -49,5 +62,5 @@ password.
 npm run desktop:build
 ```
 
-Phase 1 is a developer-checkout wrapper, not a standalone installer. ChromaDB,
-allowed folders, LM Studio presets, and Docker flows are intentionally unchanged.
+This is still a developer-checkout wrapper, not a standalone installer. Docker
+flows remain unchanged for users who prefer Compose.

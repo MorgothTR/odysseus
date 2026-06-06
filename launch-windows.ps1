@@ -119,6 +119,17 @@ Write-Step "Installing dependencies (first run can take a few minutes)"
 & $venvPy -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) { Fail "Dependency install failed. Scroll up for the pip error." }
 
+# chromadb-client is HTTP-only and conflicts with embedded ChromaDB. Remove it
+# from existing venvs before forcing the full chromadb package into place.
+$clientCheck = & $venvPy -m pip show chromadb-client 2>$null
+if ($LASTEXITCODE -eq 0 -and $clientCheck) {
+    Write-Step "Replacing HTTP-only chromadb-client with embedded ChromaDB"
+    & $venvPy -m pip uninstall -y chromadb-client
+    if ($LASTEXITCODE -ne 0) { Fail "Failed to remove chromadb-client." }
+    & $venvPy -m pip install --force-reinstall chromadb
+    if ($LASTEXITCODE -ne 0) { Fail "Failed to install full chromadb package." }
+}
+
 # 4. First-time setup (creates data dirs, DB, .env, admin user)
 Write-Step "Running first-time setup"
 $desktopEnvBackup = @{}
