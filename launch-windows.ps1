@@ -9,13 +9,15 @@
   Usage:
     powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1
     powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Port 7000 -BindHost 127.0.0.1
+    powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Desktop -Port 7000 -BindHost 127.0.0.1
 
   Tip: bind 127.0.0.1 (default) for local-only use. Use 0.0.0.0 only when you
   intentionally want other devices on your LAN to reach it.
 #>
 param(
     [int]$Port = 7000,
-    [string]$BindHost = "127.0.0.1"
+    [string]$BindHost = "127.0.0.1",
+    [switch]$Desktop
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +28,9 @@ function Fail($msg) {
     Write-Host ""
     Write-Host ("ERROR: " + $msg) -ForegroundColor Red
     Write-Host ""
-    Read-Host "Press Enter to exit"
+    if (-not $Desktop) {
+        Read-Host "Press Enter to exit"
+    }
     exit 1
 }
 
@@ -117,8 +121,21 @@ if ($LASTEXITCODE -ne 0) { Fail "Dependency install failed. Scroll up for the pi
 
 # 4. First-time setup (creates data dirs, DB, .env, admin user)
 Write-Step "Running first-time setup"
+$desktopEnvBackup = @{}
+if ($Desktop) {
+    foreach ($key in @("ODYSSEUS_SKIP_ADMIN_PROMPT", "ODYSSEUS_SKIP_RUN_HINT")) {
+        $desktopEnvBackup[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, "1", "Process")
+    }
+}
 & $venvPy setup.py
-if ($LASTEXITCODE -ne 0) { Fail "setup.py failed." }
+$setupExitCode = $LASTEXITCODE
+if ($Desktop) {
+    foreach ($key in $desktopEnvBackup.Keys) {
+        [Environment]::SetEnvironmentVariable($key, $desktopEnvBackup[$key], "Process")
+    }
+}
+if ($setupExitCode -ne 0) { Fail "setup.py failed." }
 
 # 5. Friendly note about Git Bash (full Cookbook / agent-shell parity)
 if (-not (Find-GitBash)) {
