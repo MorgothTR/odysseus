@@ -17,6 +17,11 @@ from src.settings import (
     save_features as _save_features,
     DEFAULT_SETTINGS,
 )
+from src.tool_path_roots import (
+    ToolPathRootError,
+    normalize_tool_path_root,
+    normalize_tool_path_roots,
+)
 from src.integrations import (
     load_integrations,
     add_integration,
@@ -69,6 +74,11 @@ class RenameUserRequest(BaseModel):
 
 class SetOpenRegistrationRequest(BaseModel):
     enabled: bool
+
+
+class ToolPathRootTestRequest(BaseModel):
+    path: str
+
 
 SESSION_COOKIE = "odysseus_session"
 
@@ -455,9 +465,36 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            if key == "tool_path_extra_roots":
+                try:
+                    val = normalize_tool_path_roots(val)
+                except ToolPathRootError as e:
+                    raise HTTPException(400, str(e))
             current[key] = val
         _save_settings(current)
         return current
+
+    @router.post("/tool-path-roots/test")
+    async def test_tool_path_root(request: Request, body: ToolPathRootTestRequest):
+        """Admin only: verify a local folder is reachable by file tools."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        try:
+            normalized = normalize_tool_path_root(body.path)
+            from src.tool_execution import _resolve_tool_path
+            resolved = _resolve_tool_path(normalized)
+            with os.scandir(resolved):
+                pass
+        except ToolPathRootError as e:
+            raise HTTPException(400, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except PermissionError:
+            raise HTTPException(400, "Folder exists but cannot be read by Odysseus")
+        except OSError as e:
+            raise HTTPException(400, f"Folder access failed: {e.strerror or e.__class__.__name__}")
+        return {"ok": True, "path": normalized, "message": "Folder is reachable by file tools"}
 
     # ---- Integrations CRUD ----
 

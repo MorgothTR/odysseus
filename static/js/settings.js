@@ -38,6 +38,7 @@ function initTabs() {
       document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
+      if (tab === 'local-files') refreshLocalFileAccess();
     });
   });
 }
@@ -1606,6 +1607,198 @@ async function initAgentSettings() {
 /* ═══════════════════════════════════════════
    APPEARANCE TAB
    ═══════════════════════════════════════════ */
+/* ── Local File Access ── */
+let _localFileAccessInitialized = false;
+let _localFileRoots = [];
+
+function _tauriFolderPicker() {
+  return window.__TAURI__ &&
+    window.__TAURI__.dialog &&
+    typeof window.__TAURI__.dialog.open === 'function'
+    ? window.__TAURI__.dialog.open
+    : null;
+}
+
+function _clientNormalizeFolderPath(path) {
+  const value = String(path || '').trim().replace(/\\/g, '/');
+  if (/^[A-Za-z]:\/+$/.test(value)) return value.slice(0, 3);
+  return value.replace(/\/+$/, '');
+}
+
+async function _responseErrorMessage(res, fallback) {
+  try {
+    const data = await res.json();
+    if (data && data.detail) return String(data.detail);
+  } catch (_) {}
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch (_) {}
+  return fallback || 'Request failed';
+}
+
+function _setLocalFileMsg(message, isError) {
+  const msg = el('set-local-folder-msg');
+  if (!msg) return;
+  msg.textContent = message || '';
+  msg.style.color = isError ? 'var(--red)' : 'color-mix(in srgb, var(--fg) 55%, transparent)';
+}
+
+function _renderLocalFileRoots() {
+  const list = el('set-local-folder-list');
+  if (!list) return;
+  if (!_localFileRoots.length) {
+    list.innerHTML = '<div class="admin-empty">No extra local folders allowed</div>';
+    return;
+  }
+  list.innerHTML = _localFileRoots.map(function(path, idx) {
+    return `
+      <div class="admin-user-row" data-local-folder-row="${idx}">
+        <div style="min-width:0;flex:1;">
+          <div class="admin-user-name" title="${esc(path)}" style="word-break:break-all;">${esc(path)}</div>
+          <div class="admin-toggle-sub">Allowed for read_file, write_file, grep, glob, and ls</div>
+        </div>
+        <button type="button" class="admin-btn-sm" data-local-folder-test="${idx}">Test</button>
+        <button type="button" class="admin-btn-delete" data-local-folder-remove="${idx}">Remove</button>
+      </div>`;
+  }).join('');
+}
+
+async function refreshLocalFileAccess() {
+  const list = el('set-local-folder-list');
+  if (!list) return;
+  try {
+    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    const settings = await res.json();
+    _localFileRoots = Array.isArray(settings.tool_path_extra_roots)
+      ? settings.tool_path_extra_roots.map(_clientNormalizeFolderPath).filter(Boolean)
+      : [];
+    _renderLocalFileRoots();
+  } catch (e) {
+    console.warn('Failed to load local file roots', e);
+    list.innerHTML = '<div class="admin-empty">Failed to load local folders</div>';
+  }
+}
+
+async function _saveLocalFileRoots(nextRoots) {
+  const res = await fetch('/api/auth/settings', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool_path_extra_roots: nextRoots })
+  });
+  if (!res.ok) throw new Error(await _responseErrorMessage(res, 'Failed to save local folders'));
+  const settings = await res.json();
+  _localFileRoots = Array.isArray(settings.tool_path_extra_roots)
+    ? settings.tool_path_extra_roots.map(_clientNormalizeFolderPath).filter(Boolean)
+    : [];
+  _renderLocalFileRoots();
+}
+
+async function _addLocalFileRoot(path) {
+  const normalized = _clientNormalizeFolderPath(path);
+  if (!normalized) {
+    _setLocalFileMsg('Enter a folder path', true);
+    return;
+  }
+  try {
+    await _saveLocalFileRoots(_localFileRoots.concat([normalized]));
+    const input = el('set-local-folder-input');
+    if (input) input.value = '';
+    _setLocalFileMsg('Saved', false);
+  } catch (e) {
+    _setLocalFileMsg(e.message || 'Failed to save local folder', true);
+  }
+}
+
+async function _removeLocalFileRoot(idx) {
+  try {
+    await _saveLocalFileRoots(_localFileRoots.filter(function(_, i) { return i !== idx; }));
+    _setLocalFileMsg('Removed', false);
+  } catch (e) {
+    _setLocalFileMsg(e.message || 'Failed to remove local folder', true);
+  }
+}
+
+async function _testLocalFileRoot(idx) {
+  const path = _localFileRoots[idx];
+  if (!path) return;
+  _setLocalFileMsg('Testing...', false);
+  try {
+    const res = await fetch('/api/auth/tool-path-roots/test', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    if (!res.ok) throw new Error(await _responseErrorMessage(res, 'Test failed'));
+    const data = await res.json();
+    _setLocalFileMsg(data.message || 'Folder is reachable by file tools', false);
+  } catch (e) {
+    _setLocalFileMsg(e.message || 'Test failed', true);
+  }
+}
+
+function initLocalFileAccess() {
+  if (_localFileAccessInitialized) return;
+  const root = el('settings-modal');
+  if (!root || !root.querySelector('[data-settings-panel="local-files"]')) return;
+  _localFileAccessInitialized = true;
+
+  const input = el('set-local-folder-input');
+  const addBtn = el('set-local-folder-add');
+  const pickBtn = el('set-local-folder-pick');
+  const list = el('set-local-folder-list');
+  const picker = _tauriFolderPicker();
+
+  if (pickBtn) {
+    pickBtn.classList.toggle('hidden', !picker);
+    pickBtn.addEventListener('click', async function() {
+      const open = _tauriFolderPicker();
+      if (!open) return;
+      try {
+        const picked = await open({
+          directory: true,
+          multiple: false,
+          title: 'Choose a folder Odysseus may access'
+        });
+        if (typeof picked === 'string' && picked) await _addLocalFileRoot(picked);
+      } catch (e) {
+        _setLocalFileMsg(e.message || 'Folder picker failed', true);
+      }
+    });
+  }
+
+  if (addBtn) {
+    addBtn.addEventListener('click', function() {
+      _addLocalFileRoot(input ? input.value : '');
+    });
+  }
+  if (input) {
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _addLocalFileRoot(input.value);
+      }
+    });
+  }
+  if (list) {
+    list.addEventListener('click', function(e) {
+      const test = e.target.closest('[data-local-folder-test]');
+      if (test) {
+        _testLocalFileRoot(parseInt(test.dataset.localFolderTest, 10));
+        return;
+      }
+      const remove = e.target.closest('[data-local-folder-remove]');
+      if (remove) {
+        _removeLocalFileRoot(parseInt(remove.dataset.localFolderRemove, 10));
+      }
+    });
+  }
+
+  refreshLocalFileAccess();
+}
+
 function initAppearance() {
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
@@ -2189,6 +2382,7 @@ function initAll() {
   initResearchSettings();
   initResearchSearchSettings();
   initAgentSettings();
+  initLocalFileAccess();
   initAppearance();
   initShortcuts();
   initAccount();
@@ -5200,6 +5394,7 @@ export function open(tab) {
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
+  if (activeTab === 'local-files') refreshLocalFileAccess();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }

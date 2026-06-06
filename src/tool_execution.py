@@ -168,7 +168,7 @@ def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
     matches a sensitive filename — regardless of what root it sits under.
     """
-    parts = resolved.split(os.sep)
+    parts = [part.lower() for part in re.split(r"[\\/]+", resolved) if part]
     filenames: set[str] = {parts[-1]} if parts else set()
 
     # Check if any path component is a sensitive directory.
@@ -204,17 +204,18 @@ def _tool_path_roots() -> list[str]:
     except OSError:
         pass
 
-    # $TMPDIR — per-user temp root on macOS (e.g. /var/folders/.../T/).
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir:
-        roots.append(tmpdir)
+    # Per-user temp roots (TMPDIR on Unix/macOS, TEMP/TMP on Windows).
+    for key in ("TMPDIR", "TEMP", "TMP"):
+        tmpdir = os.environ.get(key)
+        if tmpdir:
+            roots.append(tmpdir)
 
     # Opt-in extra roots from settings.
     try:
         from src.settings import get_setting
+        from src.tool_path_roots import safe_tool_path_roots
         extra = get_setting("tool_path_extra_roots")
-        if isinstance(extra, list):
-            roots.extend(str(r) for r in extra if r)
+        roots.extend(safe_tool_path_roots(extra))
     except Exception:
         pass
 

@@ -7,6 +7,7 @@
     "frontendDist": "http://127.0.0.1:7000"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "security": {
       "csp": null

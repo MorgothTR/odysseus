@@ -25,6 +25,7 @@ struct BackendState {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(BackendState::default())
         .setup(|app| {
             let repo_root = find_repo_root()?;
