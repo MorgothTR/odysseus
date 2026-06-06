@@ -193,8 +193,8 @@ if ($LASTEXITCODE -ne 0) { Fail "Dependency install failed. Scroll up for the pi
 
 # chromadb-client is HTTP-only and conflicts with embedded ChromaDB. Remove it
 # from existing venvs before forcing the full chromadb package into place.
-$clientCheck = & $venvPy -m pip show chromadb-client 2>$null
-if ($LASTEXITCODE -eq 0 -and $clientCheck) {
+$clientCheck = Get-PipPackageInfo $venvPy "chromadb-client"
+if ($clientCheck) {
     Write-Step "Replacing HTTP-only chromadb-client with embedded ChromaDB"
     & $venvPy -m pip uninstall -y chromadb-client
     if ($LASTEXITCODE -ne 0) { Fail "Failed to remove chromadb-client." }

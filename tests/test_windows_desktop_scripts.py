@@ -24,7 +24,7 @@ def test_launcher_supports_desktop_checkonly_and_port_options():
 def test_launcher_keeps_chromadb_client_cleanup():
     script = _text(LAUNCHER)
 
-    assert "pip show chromadb-client" in script
+    assert 'Get-PipPackageInfo $venvPy "chromadb-client"' in script
     assert "pip uninstall -y chromadb-client" in script
     assert "pip install --force-reinstall chromadb" in script
 
