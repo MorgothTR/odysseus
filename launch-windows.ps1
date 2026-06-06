@@ -8,6 +8,7 @@
 
   Usage:
     powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1
+    powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -CheckOnly
     powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Port 7000 -BindHost 127.0.0.1
     powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Desktop -Port 7000 -BindHost 127.0.0.1
 
@@ -17,26 +18,59 @@
 param(
     [int]$Port = 7000,
     [string]$BindHost = "127.0.0.1",
-    [switch]$Desktop
+    [switch]$Desktop,
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
 function Write-Step($msg) { Write-Host ""; Write-Host ("==> " + $msg) -ForegroundColor Cyan }
+function Write-Check($status, $msg, $color) {
+    Write-Host ("[{0}] {1}" -f $status, $msg) -ForegroundColor $color
+}
 function Fail($msg) {
     Write-Host ""
     Write-Host ("ERROR: " + $msg) -ForegroundColor Red
     Write-Host ""
-    if (-not $Desktop) {
+    if (-not $Desktop -and -not $CheckOnly) {
         Read-Host "Press Enter to exit"
     }
     exit 1
 }
 
+function Test-Pip($pythonExe) {
+    try {
+        & $pythonExe -m pip --version *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Get-PipPackageInfo($pythonExe, $packageName) {
+    $oldPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $pythonExe -m pip show $packageName 2>$null
+        if ($LASTEXITCODE -eq 0 -and $output) { return $output }
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+    return $null
+}
+
+function Test-GitBashPath($path) {
+    if (-not $path) { return $false }
+    $normalized = $path.Replace("/", "\").ToLowerInvariant()
+    return $normalized -match "\\git\\(bin|usr\\bin)\\bash\.exe$"
+}
+
 function Find-GitBash {
     $cmd = Get-Command bash -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd -and (Test-GitBashPath $cmd.Source)) { return $cmd.Source }
 
     $roots = @()
     foreach ($name in @("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LocalAppData")) {
@@ -102,6 +136,44 @@ if (-not $pyExe) {
 }
 $pythonLabel = ("Using Python {0}: {1} {2}" -f $pyVersion, $pyExe, ($pyArgs -join ' ')).TrimEnd()
 Write-Host $pythonLabel
+
+if ($CheckOnly) {
+    Write-Step "Windows native preflight"
+    Write-Check "OK" $pythonLabel Green
+
+    $venvPy = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
+    if (Test-Path $venvPy) {
+        Write-Check "OK" ("venv found: {0}" -f $venvPy) Green
+        if (Test-Pip $venvPy) {
+            Write-Check "OK" "venv pip is available" Green
+        } else {
+            Write-Check "FAIL" "venv exists but pip is not available. Recreate venv or repair Python." Red
+            exit 1
+        }
+
+        $fullChroma = Get-PipPackageInfo $venvPy "chromadb"
+        $clientChroma = Get-PipPackageInfo $venvPy "chromadb-client"
+        if ($clientChroma) {
+            Write-Check "WARN" "chromadb-client is installed; the normal launcher will replace it with full chromadb." Yellow
+        } elseif ($fullChroma) {
+            Write-Check "OK" "full chromadb package is installed" Green
+        } else {
+            Write-Check "WARN" "chromadb is not installed yet; the normal launcher will install requirements.txt." Yellow
+        }
+    } else {
+        Write-Check "WARN" "venv not found yet; the normal launcher will create it." Yellow
+    }
+
+    if (Find-GitBash) {
+        Write-Check "OK" "Git Bash found for optional Cookbook/agent-shell parity" Green
+    } else {
+        Write-Check "WARN" "Git Bash not found. Core app works; install Git for Windows for full Cookbook/agent shell parity." Yellow
+    }
+
+    Write-Host ""
+    Write-Host "Check complete. No files were changed."
+    exit 0
+}
 
 # 2. Create the virtualenv if missing
 $venvPy = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
