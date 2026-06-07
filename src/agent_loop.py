@@ -192,6 +192,15 @@ For file patterns, use `glob` with JSON like:
 {"pattern": "**/*.py", "path": "C:/Projects/example"}
 ```"""
 
+_LOCAL_FILE_RESULT_TOOLS = frozenset({"ls", "read_file", "grep", "glob"})
+_LOCAL_FILE_SUCCESS_FOLLOWUP = (
+    "\n\n[Local file result handling]\n"
+    "The local file tool above succeeded. Treat that result as authoritative. "
+    "Do not retry the same listing/search/read with another slash style, shell "
+    "syntax, Python, or a second file tool unless the result contains an error "
+    "or the user asks for a different query. Answer the user directly now."
+)
+
 # Each tool section is keyed by tool name(s) it covers.
 # Sections with multiple tools use a tuple key.
 TOOL_SECTIONS = {
@@ -1176,6 +1185,27 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
                 f"{len(tool_blocks)} tool blocks. Preview: {resp_preview}")
 
     return tool_blocks, used_native
+
+
+def _local_file_success_followup(tool_policy: Optional[ToolPolicy], tool_name: str, result: dict) -> str:
+    """Return a follow-up note for successful routed file-tool calls.
+
+    This is deliberately tied to smart file routing. Broader project/code tasks
+    often need multiple file calls; the plain "list/search/read this path" flow
+    should usually stop after one successful dedicated file result.
+    """
+
+    if not tool_policy or tool_policy.mode != "file_routing":
+        return ""
+    if tool_name not in _LOCAL_FILE_RESULT_TOOLS:
+        return ""
+    if not isinstance(result, dict):
+        return ""
+    if result.get("error"):
+        return ""
+    if result.get("exit_code") not in (0, None):
+        return ""
+    return _LOCAL_FILE_SUCCESS_FOLLOWUP
 
 
 def _append_tool_results(
@@ -2625,6 +2655,7 @@ async def stream_agent_loop(
                 _effectful_used = True
 
             formatted = format_tool_result(desc, result)
+            formatted += _local_file_success_followup(tool_policy, block.tool_type, result)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 

@@ -178,6 +178,28 @@ def test_agent_loop_injects_smart_file_routing_directive(monkeypatch):
     assert any("Done" in event.get("delta", "") for event in _events(chunks))
 
 
+def test_local_file_success_followup_only_for_successful_file_routing():
+    policy = build_effective_tool_policy(
+        last_user_message="Search C:/Projects/example for TODO."
+    )
+
+    note = al._local_file_success_followup(policy, "grep", {"output": "No matches", "exit_code": 0})
+
+    assert "Treat that result as authoritative" in note
+    assert "Do not retry the same listing/search/read" in note
+
+
+def test_local_file_success_followup_skips_errors_and_normal_mode():
+    policy = build_effective_tool_policy(
+        last_user_message="Search C:/Projects/example for TODO."
+    )
+    normal = build_effective_tool_policy(last_user_message="Review this repo.")
+
+    assert al._local_file_success_followup(policy, "grep", {"error": "bad path", "exit_code": 1}) == ""
+    assert al._local_file_success_followup(policy, "bash", {"output": "ok", "exit_code": 0}) == ""
+    assert al._local_file_success_followup(normal, "grep", {"output": "ok", "exit_code": 0}) == ""
+
+
 def test_agent_loop_blocks_guide_only_fenced_tool_before_start(monkeypatch):
     _patch_loop_basics(monkeypatch)
     called = False
