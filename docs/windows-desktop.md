@@ -60,6 +60,8 @@ that backend process tree.
 
 A small startup window appears first. It reports backend preparation, startup,
 health checks, and app opening progress before the main Odysseus window opens.
+The PowerShell terminal you use for `npm run desktop:dev` is expected in
+development mode.
 
 ## Installed Prototype
 
@@ -155,6 +157,8 @@ code-signed, not auto-updating, and not fully offline.
 The first installed launch can take several minutes while the venv is created,
 dependencies are installed from the bundled wheelhouse, and the backend imports
 for the first time. The startup window remains visible during that wait.
+Installed app launches from the desktop shortcut or Start Menu should not open a
+separate terminal window; backend output is written to the desktop log.
 
 If you tested the Phase 5A installer, the current installed app copies existing
 `data`, `logs`, and `.env` from `%LOCALAPPDATA%\Odysseus\backend` to the new

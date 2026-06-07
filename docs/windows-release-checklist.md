@@ -30,15 +30,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify-windows-release.ps1 -R
 
 1. Install `Odysseus_1.0.0_x64-setup.exe` from the release folder.
 2. Launch Odysseus from the Start Menu or installed app shortcut.
-3. Confirm the startup window appears, then the setup/login page opens.
-4. Confirm the backend is healthy:
+3. Confirm no separate terminal or PowerShell window appears.
+4. Confirm the startup window appears, then the setup/login page opens.
+5. Confirm the backend is healthy:
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:7000/api/health |
   Select-Object -ExpandProperty Content
 ```
 
-5. Confirm runtime state exists under:
+6. Confirm runtime state exists under:
 
 ```text
 %LOCALAPPDATA%\OdysseusData\backend

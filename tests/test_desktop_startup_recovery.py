@@ -75,6 +75,27 @@ def test_startup_window_capability_does_not_expand_plugin_permissions():
     assert "tauri-plugin-opener" not in cargo
 
 
+def test_installed_desktop_hides_console_windows_and_keeps_log_redirection():
+    main = _text(TAURI_MAIN)
+    cargo = _text(TAURI_CARGO).lower()
+    capability = json.loads(_text(TAURI_CAPABILITY))
+
+    assert '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]' in main
+    assert "use std::os::windows::process::CommandExt;" in main
+    assert "const CREATE_NO_WINDOW: u32 = 0x08000000;" in main
+    assert "command.creation_flags(CREATE_NO_WINDOW);" in main
+    assert 'Command::new("powershell.exe")' in main
+    assert 'repo_root.join("logs").join("odysseus-desktop.log")' in main
+    assert ".stdout(Stdio::from(stdout))" in main
+    assert ".stderr(Stdio::from(stderr))" in main
+    assert "Start-Process" not in main
+    assert "-EncodedCommand" not in main
+    assert "-WindowStyle" not in main
+    assert "tauri-plugin-shell" not in cargo
+    assert "tauri-plugin-fs" not in cargo
+    assert capability["permissions"] == ["core:default", "dialog:allow-open"]
+
+
 def test_port_conflict_path_does_not_spawn_backend():
     main = _text(TAURI_MAIN)
 

@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{
     fs::{self, OpenOptions},
     io::{Error, ErrorKind, Read, Write},
@@ -9,9 +11,15 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tauri::{
     http, AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const APP_URL: &str = "http://127.0.0.1:7000";
 const HEALTH_ADDR: &str = "127.0.0.1:7000";
@@ -1205,6 +1213,11 @@ fn start_backend(backend: &BackendLaunch) -> Result<Child, Box<dyn std::error::E
     }
     if let Some(wheelhouse_dir) = &backend.wheelhouse_dir {
         command.env("ODYSSEUS_WHEELHOUSE_DIR", wheelhouse_dir);
+    }
+
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 
     let child = command.spawn()?;
