@@ -103,6 +103,57 @@ _GUIDE_ONLY_PATTERNS: Tuple[Tuple[re.Pattern[str], str], ...] = tuple(
 )
 
 
+_SMART_FILE_ROUTING_TOOLS = frozenset({
+    # Power tools that local models tend to overuse for simple file browsing.
+    "bash",
+    "python",
+    # Prevent unsolicited "I saved the listing to a file/document" behavior on
+    # read-only browse turns. Explicit write/edit/save requests bypass this
+    # router entirely.
+    "write_file",
+    "edit_file",
+    "create_document",
+    "edit_document",
+    "update_document",
+    "suggest_document",
+})
+
+_WINDOWS_PATH_RE = re.compile(r"\b[A-Za-z]:[\\/][^\s`\"']*")
+_RELATIVE_PATH_RE = re.compile(r"(?<!\w)(?:\.{1,2}[\\/])[^\s`\"']+")
+_DEDICATED_FILE_TOOL_RE = re.compile(
+    r"\b(?:dedicated\s+)?(?:odysseus\s+)?(?:ls|read_file|grep|glob)\s+tool\b",
+    re.IGNORECASE,
+)
+_FILE_ACCESS_INTENT_RE = re.compile(
+    r"\b(?:list|show|display|read|open|view|cat|search|find|grep|glob|"
+    r"contents?|director(?:y|ies)|folders?|files?)\b",
+    re.IGNORECASE,
+)
+_FILE_MUTATION_INTENT_RE = re.compile(
+    r"\b(?:write|save|create|edit|modify|change|delete|remove|rename|"
+    r"move|copy|append|export)\b|"
+    r"\bmake\b.{0,40}\b(?:file|document|folder|directory)\b",
+    re.IGNORECASE,
+)
+_NEGATED_POWER_TOOL_RE = re.compile(
+    r"\b(?:do\s+not|don't|dont|never|without|no)\s+"
+    r"(?:use\s+)?(?:bash|shell|powershell|pwsh|cmd|command\s+prompt|terminal|python)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_POWER_TOOL_PATTERNS: Tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:use|run|execute|call|invoke|via|with|through|as)\s+"
+        r"(?:the\s+)?(?:bash|shell|powershell|pwsh|cmd|command\s+prompt|terminal|python)\b",
+        r"\b(?:bash|shell|powershell|pwsh|cmd|command\s+prompt|terminal|python)\s+"
+        r"(?:command|script|tool)\b",
+        r"\b(?:run|execute)\s+(?:this|the\s+)?(?:command|script)\b",
+        r"^\s*(?:dir|ls|cat|type|gci|get-childitem|python|py|powershell|pwsh|"
+        r"cmd|git|npm|pip|cargo|pytest)\b",
+    )
+)
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     """Effective tool behavior for one agent turn."""
@@ -139,6 +190,37 @@ def detect_guide_only_turn(message: object) -> Optional[str]:
     for pattern, reason in _GUIDE_ONLY_PATTERNS:
         if pattern.search(text):
             return reason
+    return None
+
+
+def detect_smart_file_routing_turn(message: object) -> Optional[str]:
+    """Return a reason when a turn should prefer read-only file tools.
+
+    This is intentionally narrow. It catches plain "list/read/search this
+    local path" requests and lets explicit command/script/Python or write/edit
+    requests pass through unchanged so power-user tools remain available.
+    """
+
+    if not isinstance(message, str) or not message.strip():
+        return None
+    text = re.sub(r"\s+", " ", message.strip())
+    if not text:
+        return None
+
+    # Explicit write/edit/save requests are not read-only browsing.
+    if _FILE_MUTATION_INTENT_RE.search(text):
+        return None
+
+    # "Do not use bash" should not count as an explicit request for bash.
+    power_check = _NEGATED_POWER_TOOL_RE.sub(" ", text)
+    if any(pattern.search(power_check) for pattern in _EXPLICIT_POWER_TOOL_PATTERNS):
+        return None
+
+    has_path = bool(_WINDOWS_PATH_RE.search(text) or _RELATIVE_PATH_RE.search(text))
+    asks_for_file_tool = bool(_DEDICATED_FILE_TOOL_RE.search(text))
+    has_file_intent = bool(_FILE_ACCESS_INTENT_RE.search(text))
+    if has_file_intent and (has_path or asks_for_file_tool):
+        return "Plain local file access should use dedicated file tools for this turn."
     return None
 
 
@@ -200,6 +282,17 @@ def build_effective_tool_policy(
             mode="guide_only",
             block_all_tool_calls=True,
             disable_mcp=True,
+        )
+
+    file_route_reason = detect_smart_file_routing_turn(last_user_message)
+    if file_route_reason:
+        hidden.update(_SMART_FILE_ROUTING_TOOLS)
+        reasons.update({tool: file_route_reason for tool in _SMART_FILE_ROUTING_TOOLS})
+        return ToolPolicy(
+            disabled_tools=frozenset(disabled),
+            hidden_tools=frozenset(hidden),
+            reasons=MappingProxyType(dict(reasons)),
+            mode="file_routing",
         )
 
     return ToolPolicy(

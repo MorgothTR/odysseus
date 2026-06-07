@@ -176,6 +176,13 @@ _API_AGENT_RULES = """\
   - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
   - Listing sessions: "1. [Big Chat](#session-abc123) — 2h ago, 2. [Code Review](#session-def456) — 5h ago\""""
 
+_SMART_FILE_ROUTING_DIRECTIVE = """\
+## SMART FILE ROUTING - THIS TURN
+The latest user request is plain local file browsing/searching. Use the dedicated
+file tools only: `ls`, `read_file`, `grep`, or `glob`.
+Do NOT use `bash`, PowerShell, or `python`, and do NOT create or edit files unless
+the user explicitly asks for a write/edit/save action in a later turn."""
+
 # Each tool section is keyed by tool name(s) it covers.
 # Sections with multiple tools use a tuple key.
 TOOL_SECTIONS = {
@@ -1702,6 +1709,12 @@ async def stream_agent_loop(
         else:
             messages.insert(0, {"role": "system", "content": _ws_note})
         logger.info("[workspace] active for this turn: %s", workspace)
+    if tool_policy and tool_policy.mode == "file_routing" and not guide_only:
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = _SMART_FILE_ROUTING_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
+        else:
+            messages.insert(0, {"role": "system", "content": _SMART_FILE_ROUTING_DIRECTIVE})
+        logger.info("[tool-policy] smart file routing active for this turn")
     if plan_mode and not guide_only:
         # Steer the model to investigate-then-propose. Hard tool gating handles
         # every write path except shell; this directive is what keeps the

@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import src.agent_loop as al
 from src.agent_tools import ToolBlock
 from src.tool_execution import execute_tool_block
-from src.tool_policy import build_effective_tool_policy, detect_guide_only_turn
+from src.tool_policy import (
+    build_effective_tool_policy,
+    detect_guide_only_turn,
+    detect_smart_file_routing_turn,
+)
 
 
 def _collect(gen):
@@ -76,6 +80,53 @@ def test_normal_policy_preserves_existing_disabled_tools():
     assert not policy.blocks("bash")
 
 
+def test_smart_file_routing_detects_plain_local_file_requests():
+    assert detect_smart_file_routing_turn(
+        r"Can you list the files in C:\Projects\framescan_backup\framescan?"
+    )
+    assert detect_smart_file_routing_turn(
+        "Use the dedicated Odysseus ls tool to list C:/Projects/example. Do not use bash or PowerShell."
+    )
+    assert detect_smart_file_routing_turn(
+        "Search C:/Projects/example for TODO with grep."
+    )
+    assert detect_smart_file_routing_turn(
+        "Make a list of files in C:/Projects/example."
+    )
+
+
+def test_smart_file_routing_keeps_explicit_power_tool_requests_available():
+    assert detect_smart_file_routing_turn(
+        r"as a bash use this: dir C:\Projects\framescan_backup\framescan /b"
+    ) is None
+    assert detect_smart_file_routing_turn(
+        r"run this command: dir C:\Projects\framescan_backup\framescan /b"
+    ) is None
+    assert detect_smart_file_routing_turn(
+        "Write a Python script that lists C:/Projects/example."
+    ) is None
+    assert detect_smart_file_routing_turn(
+        "List C:/Projects/example and save the output to a text file."
+    ) is None
+    assert detect_smart_file_routing_turn(
+        "Make a text file containing the files in C:/Projects/example."
+    ) is None
+
+
+def test_smart_file_routing_policy_hides_power_and_write_tools_only_for_turn():
+    policy = build_effective_tool_policy(
+        last_user_message=r"Can you list the files in C:\Projects\framescan_backup\framescan?"
+    )
+
+    assert policy.mode == "file_routing"
+    for tool in ("bash", "python", "write_file", "edit_file", "create_document"):
+        assert policy.blocks(tool)
+        assert tool in policy.hidden_tools
+        assert "dedicated file tools" in policy.reason_for(tool)
+    for tool in ("ls", "read_file", "grep", "glob"):
+        assert not policy.blocks(tool)
+
+
 def test_executor_policy_backstop_blocks_tools():
     policy = build_effective_tool_policy(last_user_message="Do not use tools.")
     desc, result = asyncio.run(
@@ -84,6 +135,46 @@ def test_executor_policy_backstop_blocks_tools():
     assert desc == "bash: BLOCKED"
     assert result["exit_code"] == 1
     assert "forbade" in result["error"]
+
+
+def test_executor_policy_backstop_blocks_smart_file_routing_power_tools():
+    policy = build_effective_tool_policy(
+        last_user_message=r"Can you list C:\Projects\framescan_backup\framescan?"
+    )
+    desc, result = asyncio.run(
+        execute_tool_block(ToolBlock("python", "print('should not run')"), tool_policy=policy)
+    )
+    assert desc == "python: BLOCKED"
+    assert result["exit_code"] == 1
+    assert "dedicated file tools" in result["error"]
+
+
+def test_agent_loop_injects_smart_file_routing_directive(monkeypatch):
+    _patch_loop_basics(monkeypatch)
+    sent_messages = []
+
+    async def _fake_stream(_candidates, messages, **kwargs):
+        sent_messages.extend(messages)
+        yield _delta_chunk("Done")
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
+
+    prompt = r"Can you list the files in C:\Projects\framescan_backup\framescan?"
+    policy = build_effective_tool_policy(last_user_message=prompt)
+    chunks = _collect(
+        al.stream_agent_loop(
+            "http://local.test/v1",
+            "local-model",
+            [{"role": "user", "content": prompt}],
+            max_rounds=1,
+            relevant_tools={"ls", "read_file", "grep", "glob"},
+            tool_policy=policy,
+        )
+    )
+
+    assert any("SMART FILE ROUTING - THIS TURN" in msg.get("content", "") for msg in sent_messages)
+    assert any("Done" in event.get("delta", "") for event in _events(chunks))
 
 
 def test_agent_loop_blocks_guide_only_fenced_tool_before_start(monkeypatch):
