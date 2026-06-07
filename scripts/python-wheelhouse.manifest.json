@@ -15,9 +15,9 @@
       "sha256": "4708045e2d7a6c6bdf8aafa8ed39649eaf926a4543b54560659129e3365953c4"
     },
     {
-      "filename": "aiohttp-3.14.0-cp312-cp312-win_amd64.whl",
-      "size": 476145,
-      "sha256": "b0a5747586d4467efd1f932710b269131c9717a872dce082cd92a00c1c13123a"
+      "filename": "aiohttp-3.14.1-cp312-cp312-win_amd64.whl",
+      "size": 479873,
+      "sha256": "2aa92c87868cd13674989f9ee83e5f9f7ea4237589b728048e1f0c8f6caa3271"
     },
     {
       "filename": "aiosignal-1.4.0-py3-none-any.whl",
