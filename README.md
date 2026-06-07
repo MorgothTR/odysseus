@@ -308,6 +308,9 @@ runtime state lives under `%LOCALAPPDATA%\OdysseusData`.
 For a private unsigned release folder with NSIS/MSI artifacts, SHA-256 hashes,
 and warning notes, run `npm run desktop:release`. Windows SmartScreen or
 antivirus tools may warn because these artifacts are not code-signed.
+Verify the release folder with `npm run desktop:release:verify`; the manual
+release checklist is in
+[`docs/windows-release-checklist.md`](docs/windows-release-checklist.md).
 
 ## Troubleshooting & Advanced Setup
 

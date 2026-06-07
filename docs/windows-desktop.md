@@ -10,6 +10,8 @@ desktop users can see progress and copy safe diagnostics when startup fails.
 Phase 8 adds an installed-only venv rebuild action that preserves user data.
 Phase 9 adds a repeatable unsigned release package with SHA-256 hashes for
 private/local distribution.
+Phase 10 adds a repeatable release verification command and checklist for
+private unsigned releases.
 Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout
 for the core app.
 
@@ -113,6 +115,15 @@ Verify a copied artifact hash:
 Get-FileHash .\dist\windows-unsigned\Odysseus-1.0.0\Odysseus_1.0.0_x64-setup.exe -Algorithm SHA256
 Get-Content .\dist\windows-unsigned\Odysseus-1.0.0\SHA256SUMS.txt
 ```
+
+Or verify the full release folder:
+
+```powershell
+npm run desktop:release:verify
+```
+
+For the clean install, upgrade, uninstall, and self-repair smoke checklist, see
+[`docs/windows-release-checklist.md`](windows-release-checklist.md).
 
 This release package is unsigned. Windows SmartScreen, Microsoft Defender,
 Norton, or other antivirus tools may warn that the publisher is unknown. For
@@ -268,3 +279,7 @@ Compose.
 Phase 9 additionally packages the unsigned NSIS and MSI outputs into
 `dist/windows-unsigned/Odysseus-<version>/` with SHA-256 hashes and release
 notes for private/local distribution.
+
+Phase 10 verifies that release folder with `npm run desktop:release:verify` and
+documents the manual release smoke checklist in
+[`docs/windows-release-checklist.md`](windows-release-checklist.md).
