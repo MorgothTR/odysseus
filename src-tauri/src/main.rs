@@ -128,6 +128,14 @@ const STARTUP_HTML: &str = r#"<!doctype html>
       cursor: pointer;
     }
     button:hover { border-color: #38bdf8; }
+    button[hidden] { display: none; }
+    .repair-note {
+      display: none;
+      margin: 8px 0 0;
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.35;
+    }
     textarea {
       position: fixed;
       left: -9999px;
@@ -143,10 +151,13 @@ const STARTUP_HTML: &str = r#"<!doctype html>
     <section id="failure">
       <div id="failure-text"></div>
       <div class="actions">
+        <button id="retry">Try Again</button>
+        <button id="repair" hidden>Rebuild Venv & Retry</button>
         <button id="copy">Copy Diagnostics</button>
         <button id="logs">Open Logs</button>
         <button id="quit">Quit</button>
       </div>
+      <p id="repair-note" class="repair-note">Rebuild keeps your data, settings, auth, logs, and Chroma store.</p>
     </section>
   </main>
   <textarea id="clipboard-fallback"></textarea>
@@ -154,6 +165,9 @@ const STARTUP_HTML: &str = r#"<!doctype html>
     const message = document.getElementById("message");
     const failure = document.getElementById("failure");
     const failureText = document.getElementById("failure-text");
+    const retryButton = document.getElementById("retry");
+    const repairButton = document.getElementById("repair");
+    const repairNote = document.getElementById("repair-note");
     const copyButton = document.getElementById("copy");
     const logsButton = document.getElementById("logs");
     const quitButton = document.getElementById("quit");
@@ -187,6 +201,19 @@ const STARTUP_HTML: &str = r#"<!doctype html>
       failure.style.display = "block";
     }
 
+    function resetForRetry(text) {
+      failed = false;
+      failure.style.display = "none";
+      failureText.textContent = "";
+      message.textContent = text;
+    }
+
+    function setRepairVisibility(diagnostics) {
+      const repairAvailable = /^Repair available: true$/m.test(diagnostics);
+      repairButton.hidden = !repairAvailable;
+      repairNote.style.display = repairAvailable ? "block" : "none";
+    }
+
     if (listen) {
       listen("startup://failed", (event) => showFailure(event.payload));
     }
@@ -197,6 +224,7 @@ const STARTUP_HTML: &str = r#"<!doctype html>
         const diagnostics = await invoke("desktop_diagnostics");
         const status = diagnostics.match(/^Last status: (.*)$/m);
         const error = diagnostics.match(/^Last error: (.*)$/m);
+        setRepairVisibility(diagnostics);
         if (!failed && status && status[1]) {
           message.textContent = status[1];
         }
@@ -209,6 +237,29 @@ const STARTUP_HTML: &str = r#"<!doctype html>
 
     setTimeout(refreshFromDiagnostics, 250);
     setInterval(refreshFromDiagnostics, 1000);
+
+    async function invokeRecovery(command, text) {
+      if (!invoke) return;
+      resetForRetry(text);
+      retryButton.disabled = true;
+      repairButton.disabled = true;
+      try {
+        await invoke(command);
+      } catch (error) {
+        showFailure(String(error));
+      } finally {
+        retryButton.disabled = false;
+        repairButton.disabled = false;
+      }
+    }
+
+    retryButton.addEventListener("click", async () => {
+      await invokeRecovery("retry_desktop_startup", "Retrying Odysseus startup...");
+    });
+
+    repairButton.addEventListener("click", async () => {
+      await invokeRecovery("rebuild_desktop_venv_and_retry", "Rebuilding the installed venv and retrying...");
+    });
 
     copyButton.addEventListener("click", async () => {
       if (!invoke) return;
@@ -251,6 +302,8 @@ struct DesktopDiagnostics {
     wheelhouse_dir: Option<PathBuf>,
     last_status: String,
     last_error: Option<String>,
+    last_repair_action: Option<String>,
+    startup_active: bool,
     owned_backend: bool,
     reused_backend: bool,
     port_conflict: bool,
@@ -266,6 +319,8 @@ impl Default for DesktopDiagnostics {
             wheelhouse_dir: None,
             last_status: "Starting Odysseus desktop".to_string(),
             last_error: None,
+            last_repair_action: None,
+            startup_active: false,
             owned_backend: false,
             reused_backend: false,
             port_conflict: false,
@@ -276,6 +331,7 @@ impl Default for DesktopDiagnostics {
 #[derive(Default)]
 struct BackendState {
     child: Mutex<Option<Child>>,
+    startup_active: Mutex<bool>,
     diagnostics: Mutex<DesktopDiagnostics>,
 }
 
@@ -302,13 +358,16 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_diagnostics,
             open_desktop_log_folder,
+            retry_desktop_startup,
+            rebuild_desktop_venv_and_retry,
             quit_desktop
         ])
         .manage(BackendState::default())
         .setup(|app| {
             create_startup_window(app)?;
             let app_handle = app.handle().clone();
-            thread::spawn(move || run_desktop_startup(app_handle));
+            start_desktop_startup_task(app_handle, "Preparing local desktop runtime...")
+                .map_err(|err| Error::new(ErrorKind::Other, err))?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -352,6 +411,47 @@ fn open_desktop_log_folder(state: State<'_, BackendState>) -> Result<(), String>
 }
 
 #[tauri::command]
+fn retry_desktop_startup(app: AppHandle) -> Result<(), String> {
+    let snapshot = diagnostics_snapshot(&app.state::<BackendState>());
+    if snapshot.startup_active {
+        return Err("Odysseus startup is already running.".to_string());
+    }
+    stop_owned_backend(&app);
+    if let Some(root) = snapshot.backend_root {
+        append_log_line(&root, "Retrying desktop startup without repair");
+    }
+    start_desktop_startup_task(app, "Retrying Odysseus startup...")
+}
+
+#[tauri::command]
+fn rebuild_desktop_venv_and_retry(app: AppHandle) -> Result<(), String> {
+    let snapshot = diagnostics_snapshot(&app.state::<BackendState>());
+    let venv = repair_venv_target(&snapshot)?;
+    stop_owned_backend(&app);
+    remove_repair_venv_only(&venv).map_err(|err| {
+        format!(
+            "Failed to remove installed venv at {}: {err}",
+            venv.display()
+        )
+    })?;
+    if let Some(root) = venv.parent() {
+        append_log_line(
+            root,
+            "Repair requested: removed installed backend venv; preserving data, logs, .env, auth, settings, and Chroma",
+        );
+    }
+    update_diagnostics(&app, |diagnostics| {
+        diagnostics.last_repair_action = Some(format!(
+            "Removed installed backend venv at {}",
+            venv.display()
+        ));
+        diagnostics.last_error = None;
+        diagnostics.port_conflict = false;
+    });
+    start_desktop_startup_task(app, "Rebuilding installed venv and retrying startup...")
+}
+
+#[tauri::command]
 fn quit_desktop(app: AppHandle) -> Result<(), String> {
     stop_owned_backend(&app);
     app.exit(0);
@@ -371,8 +471,17 @@ fn create_startup_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+fn start_desktop_startup_task(app: AppHandle, message: &str) -> Result<(), String> {
+    mark_startup_active(&app)?;
+    emit_startup_status(&app, EVENT_PREPARING_BACKEND, message);
+    thread::spawn(move || run_desktop_startup(app));
+    Ok(())
+}
+
 fn run_desktop_startup(app: AppHandle) {
-    if let Err(err) = run_desktop_startup_inner(&app) {
+    let result = run_desktop_startup_inner(&app);
+    mark_startup_inactive(&app);
+    if let Err(err) = result {
         fail_startup(&app, &err);
     }
 }
@@ -518,6 +627,35 @@ fn record_port_conflict(app: &AppHandle) {
     });
 }
 
+fn mark_startup_active(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<BackendState>();
+    {
+        let mut active = state
+            .startup_active
+            .lock()
+            .map_err(|_| "startup guard lock poisoned".to_string())?;
+        if *active {
+            return Err("Odysseus startup is already running.".to_string());
+        }
+        *active = true;
+    }
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.startup_active = true;
+        diagnostics.last_error = None;
+    });
+    Ok(())
+}
+
+fn mark_startup_inactive(app: &AppHandle) {
+    let state = app.state::<BackendState>();
+    if let Ok(mut active) = state.startup_active.lock() {
+        *active = false;
+    }
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.startup_active = false;
+    });
+}
+
 fn update_diagnostics<F>(app: &AppHandle, update: F)
 where
     F: FnOnce(&mut DesktopDiagnostics),
@@ -550,9 +688,18 @@ fn build_diagnostics(state: &BackendState) -> String {
         "Last error: {}\n",
         value_or_none(&snapshot.last_error)
     ));
+    output.push_str(&format!(
+        "Last repair action: {}\n",
+        value_or_none(&snapshot.last_repair_action)
+    ));
+    output.push_str(&format!("Startup active: {}\n", snapshot.startup_active));
     output.push_str(&format!("Owned backend: {}\n", snapshot.owned_backend));
     output.push_str(&format!("Reused backend: {}\n", snapshot.reused_backend));
     output.push_str(&format!("Port conflict: {}\n", snapshot.port_conflict));
+    output.push_str(&format!(
+        "Repair available: {}\n",
+        repair_venv_target(&snapshot).is_ok()
+    ));
     output.push_str(&format!("Health probe healthy: {}\n", health));
     output.push_str(&format!("Port 7000 listening: {}\n", port));
     output.push_str(&format!(
@@ -568,10 +715,55 @@ fn build_diagnostics(state: &BackendState) -> String {
         "Bundled wheelhouse: {}\n",
         path_value(&snapshot.wheelhouse_dir)
     ));
+    output.push_str(&format!(
+        "Installed venv: {}\n",
+        path_value(&snapshot.backend_root.as_ref().map(|root| root.join("venv")))
+    ));
     output.push_str("\nRedacted desktop log tail\n");
     output.push_str("-------------------------\n");
     output.push_str(&redacted_log_tail(snapshot.log_path.as_deref()));
     output
+}
+
+fn repair_venv_target(snapshot: &DesktopDiagnostics) -> Result<PathBuf, String> {
+    if snapshot.startup_active {
+        return Err("Startup is already running.".to_string());
+    }
+    if snapshot.port_conflict {
+        return Err(
+            "Port 7000 is already in use. Stop the other service before repairing the venv."
+                .to_string(),
+        );
+    }
+    if snapshot.mode != "installed" || snapshot.python_exe.is_none() {
+        return Err(
+            "Venv repair is only available for installed Odysseus desktop launches.".to_string(),
+        );
+    }
+
+    let backend_root = snapshot
+        .backend_root
+        .as_ref()
+        .ok_or_else(|| "Backend root is not known yet.".to_string())?;
+    let expected_backend_root = local_data_root()
+        .map_err(|err| err.to_string())?
+        .join("backend");
+    if !same_path_or_equal(backend_root, &expected_backend_root) {
+        return Err(format!(
+            "Refusing to repair unexpected backend root: {}",
+            backend_root.display()
+        ));
+    }
+
+    let venv = backend_root.join("venv");
+    let expected_venv = expected_backend_root.join("venv");
+    if !same_path_or_equal(&venv, &expected_venv) {
+        return Err(format!(
+            "Refusing to repair unexpected venv path: {}",
+            venv.display()
+        ));
+    }
+    Ok(venv)
 }
 
 fn value_or_none(value: &Option<String>) -> String {
@@ -798,6 +990,25 @@ fn remove_backend_venv(backend_root: &Path) -> std::io::Result<()> {
     }
 }
 
+fn remove_repair_venv_only(venv: &Path) -> std::io::Result<()> {
+    let name = venv.file_name().and_then(|name| name.to_str());
+    if !matches!(name, Some(name) if name.eq_ignore_ascii_case("venv")) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("refusing to remove non-venv path: {}", venv.display()),
+        ));
+    }
+    if !venv.exists() {
+        return Ok(());
+    }
+    let metadata = fs::metadata(venv)?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(venv)
+    } else {
+        fs::remove_file(venv)
+    }
+}
+
 fn copy_backend_resources(source: &Path, target: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(target)?;
     remove_unpreserved_backend_entries(target)?;
@@ -861,6 +1072,19 @@ fn same_path(left: &Path, right: &Path) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
+}
+
+fn same_path_or_equal(left: &Path, right: &Path) -> bool {
+    if same_path(left, right) {
+        return true;
+    }
+    path_text(left).eq_ignore_ascii_case(&path_text(right))
+}
+
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy()
+        .trim_end_matches(['\\', '/'])
+        .to_string()
 }
 
 fn health_ok() -> bool {

@@ -7,6 +7,7 @@ Docker support or rebuild the frontend. It opens the existing Odysseus UI from
 Phase 6 adds a managed Python runtime and bundled dependency wheelhouse to the
 unsigned installer prototype. Phase 7 adds a small startup/recovery window so
 desktop users can see progress and copy safe diagnostics when startup fails.
+Phase 8 adds an installed-only venv rebuild action that preserves user data.
 Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout
 for the core app.
 
@@ -129,10 +130,16 @@ still use the existing terminal setup flow.
 
 If desktop startup fails, the startup window stays open with:
 
+- Try Again: retries startup without changing files.
+- Rebuild Venv & Retry: installed desktop only; deletes and recreates only
+  `%LOCALAPPDATA%\OdysseusData\backend\venv`.
 - Copy Diagnostics: copies a redacted startup report.
 - Open Logs: opens the Odysseus desktop log folder in Explorer.
 - Quit: exits the desktop shell and stops only a backend process started by
   this desktop launch.
+
+The venv rebuild keeps `data`, `logs`, `.env`, auth, settings, Chroma storage,
+and user files.
 
 Verify the backend:
 
