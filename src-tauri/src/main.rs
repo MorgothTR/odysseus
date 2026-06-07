@@ -9,13 +9,16 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    http, AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 const APP_URL: &str = "http://127.0.0.1:7000";
 const HEALTH_ADDR: &str = "127.0.0.1:7000";
 const HEALTH_REQUEST: &[u8] =
     b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:7000\r\nConnection: close\r\n\r\n";
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
+const DEV_STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
+const INSTALLED_STARTUP_TIMEOUT: Duration = Duration::from_secs(420);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const BACKEND_RESOURCE_DIR: &str = "backend";
 const PYTHON_RESOURCE_DIR: &str = "python";
@@ -26,15 +29,254 @@ const PYTHON_RUNTIME_ID_FILE: &str = "ODYSSEUS_PYTHON_RUNTIME_ID.txt";
 const PYTHON_RUNTIME_MARKER: &str = ".odysseus-desktop-python-runtime";
 const PRESERVED_BACKEND_NAMES: &[&str] = &["data", "logs", "venv", ".env", PYTHON_RUNTIME_MARKER];
 
+const MAIN_LABEL: &str = "main";
+const STARTUP_LABEL: &str = "startup";
+const STARTUP_SCHEME: &str = "odysseus-startup";
+const STARTUP_URL: &str = "odysseus-startup://localhost/";
+const EVENT_CHECKING_BACKEND: &str = "startup://checking-existing-backend";
+const EVENT_PREPARING_BACKEND: &str = "startup://preparing-backend";
+const EVENT_STARTING_BACKEND: &str = "startup://starting-backend";
+const EVENT_WAITING_FOR_HEALTH: &str = "startup://waiting-for-health";
+const EVENT_OPENING_APP: &str = "startup://opening-app";
+const EVENT_FAILED: &str = "startup://failed";
+
+const STARTUP_HTML: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Starting Odysseus</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #111827;
+      color: #f8fafc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(135deg, rgba(17, 24, 39, 0.98), rgba(25, 33, 46, 0.98)),
+        #111827;
+    }
+    main {
+      width: min(440px, calc(100vw - 48px));
+      padding: 28px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    #message {
+      min-height: 48px;
+      margin: 0 0 22px;
+      color: #cbd5e1;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+    .bar {
+      width: 100%;
+      height: 6px;
+      overflow: hidden;
+      background: #334155;
+      border-radius: 3px;
+    }
+    .bar span {
+      display: block;
+      width: 44%;
+      height: 100%;
+      background: #38bdf8;
+      border-radius: 3px;
+      animation: slide 1.25s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0% { transform: translateX(-110%); }
+      55% { transform: translateX(95%); }
+      100% { transform: translateX(240%); }
+    }
+    #failure {
+      display: none;
+      margin-top: 18px;
+    }
+    #failure-text {
+      white-space: pre-wrap;
+      padding: 12px 0;
+      color: #fecaca;
+      line-height: 1.45;
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    button {
+      border: 1px solid #475569;
+      background: #1f2937;
+      color: #f8fafc;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #38bdf8; }
+    textarea {
+      position: fixed;
+      left: -9999px;
+      top: -9999px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Starting Odysseus</h1>
+    <p id="message">Preparing the desktop app...</p>
+    <div class="bar" aria-hidden="true"><span></span></div>
+    <section id="failure">
+      <div id="failure-text"></div>
+      <div class="actions">
+        <button id="copy">Copy Diagnostics</button>
+        <button id="logs">Open Logs</button>
+        <button id="quit">Quit</button>
+      </div>
+    </section>
+  </main>
+  <textarea id="clipboard-fallback"></textarea>
+  <script>
+    const message = document.getElementById("message");
+    const failure = document.getElementById("failure");
+    const failureText = document.getElementById("failure-text");
+    const copyButton = document.getElementById("copy");
+    const logsButton = document.getElementById("logs");
+    const quitButton = document.getElementById("quit");
+    const fallback = document.getElementById("clipboard-fallback");
+    const tauriApi = window.__TAURI__ || {};
+    const listen = tauriApi.event && tauriApi.event.listen;
+    const invoke = tauriApi.core && tauriApi.core.invoke;
+    let failed = false;
+
+    const statusText = {
+      "startup://checking-existing-backend": "Checking for an existing Odysseus backend...",
+      "startup://preparing-backend": "Preparing local desktop runtime...",
+      "startup://starting-backend": "Starting the Odysseus backend...",
+      "startup://waiting-for-health": "Waiting for Odysseus to become ready...",
+      "startup://opening-app": "Opening Odysseus..."
+    };
+
+    async function register(eventName) {
+      if (!listen) return;
+      await listen(eventName, (event) => {
+        const payload = event.payload || statusText[eventName] || "";
+        message.textContent = payload;
+      });
+    }
+
+    Object.keys(statusText).forEach((eventName) => register(eventName));
+    function showFailure(text) {
+      failed = true;
+      message.textContent = "Odysseus could not start.";
+      failureText.textContent = text || "Startup failed. Diagnostics may help.";
+      failure.style.display = "block";
+    }
+
+    if (listen) {
+      listen("startup://failed", (event) => showFailure(event.payload));
+    }
+
+    async function refreshFromDiagnostics() {
+      if (!invoke) return;
+      try {
+        const diagnostics = await invoke("desktop_diagnostics");
+        const status = diagnostics.match(/^Last status: (.*)$/m);
+        const error = diagnostics.match(/^Last error: (.*)$/m);
+        if (!failed && status && status[1]) {
+          message.textContent = status[1];
+        }
+        if (error && error[1] && error[1] !== "none") {
+          showFailure(error[1]);
+        }
+      } catch (_) {
+      }
+    }
+
+    setTimeout(refreshFromDiagnostics, 250);
+    setInterval(refreshFromDiagnostics, 1000);
+
+    copyButton.addEventListener("click", async () => {
+      if (!invoke) return;
+      const diagnostics = await invoke("desktop_diagnostics");
+      try {
+        await navigator.clipboard.writeText(diagnostics);
+      } catch (_) {
+        fallback.value = diagnostics;
+        fallback.select();
+        document.execCommand("copy");
+      }
+      copyButton.textContent = "Copied";
+      setTimeout(() => { copyButton.textContent = "Copy Diagnostics"; }, 1800);
+    });
+
+    logsButton.addEventListener("click", async () => {
+      if (invoke) await invoke("open_desktop_log_folder");
+    });
+
+    quitButton.addEventListener("click", async () => {
+      if (invoke) await invoke("quit_desktop");
+    });
+  </script>
+</body>
+</html>
+"#;
+
 struct BackendLaunch {
     root: PathBuf,
     python_exe: Option<PathBuf>,
     wheelhouse_dir: Option<PathBuf>,
 }
 
+#[derive(Clone)]
+struct DesktopDiagnostics {
+    mode: String,
+    backend_root: Option<PathBuf>,
+    log_path: Option<PathBuf>,
+    python_exe: Option<PathBuf>,
+    wheelhouse_dir: Option<PathBuf>,
+    last_status: String,
+    last_error: Option<String>,
+    owned_backend: bool,
+    reused_backend: bool,
+    port_conflict: bool,
+}
+
+impl Default for DesktopDiagnostics {
+    fn default() -> Self {
+        Self {
+            mode: "unknown".to_string(),
+            backend_root: None,
+            log_path: None,
+            python_exe: None,
+            wheelhouse_dir: None,
+            last_status: "Starting Odysseus desktop".to_string(),
+            last_error: None,
+            owned_backend: false,
+            reused_backend: false,
+            port_conflict: false,
+        }
+    }
+}
+
 #[derive(Default)]
 struct BackendState {
     child: Mutex<Option<Child>>,
+    diagnostics: Mutex<DesktopDiagnostics>,
 }
 
 impl Drop for BackendState {
@@ -51,54 +293,344 @@ impl Drop for BackendState {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .register_uri_scheme_protocol(STARTUP_SCHEME, |_ctx, _request| {
+            http::Response::builder()
+                .header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .body(STARTUP_HTML.as_bytes().to_vec())
+                .expect("valid startup response")
+        })
+        .invoke_handler(tauri::generate_handler![
+            desktop_diagnostics,
+            open_desktop_log_folder,
+            quit_desktop
+        ])
         .manage(BackendState::default())
         .setup(|app| {
-            let backend = resolve_backend_launch(app)?;
-            let reused = health_ok();
-
-            if !reused {
-                let child = start_backend(&backend)?;
-                let state = app.state::<BackendState>();
-                let mut backend_child = state
-                    .child
-                    .lock()
-                    .map_err(|_| Error::new(ErrorKind::Other, "backend lock poisoned"))?;
-                *backend_child = Some(child);
-
-                if !wait_for_health(STARTUP_TIMEOUT) {
-                    stop_owned_backend(app.handle());
-                    return Err(Error::new(
-                        ErrorKind::TimedOut,
-                        "Odysseus backend did not become healthy within 180 seconds",
-                    )
-                    .into());
-                }
-            } else {
-                append_log_line(&backend.root, "Reusing existing Odysseus backend");
-            }
-
-            WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::External(APP_URL.parse().expect("valid Odysseus URL")),
-            )
-            .title("Odysseus")
-            .inner_size(1280.0, 860.0)
-            .min_inner_size(960.0, 640.0)
-            .build()?;
-
+            create_startup_window(app)?;
+            let app_handle = app.handle().clone();
+            thread::spawn(move || run_desktop_startup(app_handle));
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::CloseRequested { .. }) && window.label() == "main" {
+            if !matches!(event, WindowEvent::CloseRequested { .. }) {
+                return;
+            }
+
+            if window.label() == MAIN_LABEL {
                 stop_owned_backend(window.app_handle());
+            } else if window.label() == STARTUP_LABEL
+                && window.app_handle().get_webview_window(MAIN_LABEL).is_none()
+            {
+                stop_owned_backend(window.app_handle());
+                window.app_handle().exit(0);
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running Odysseus desktop");
 }
 
-fn resolve_backend_launch(app: &tauri::App) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
+#[tauri::command]
+fn desktop_diagnostics(state: State<'_, BackendState>) -> String {
+    build_diagnostics(&state)
+}
+
+#[tauri::command]
+fn open_desktop_log_folder(state: State<'_, BackendState>) -> Result<(), String> {
+    let snapshot = diagnostics_snapshot(&state);
+    let folder = snapshot
+        .log_path
+        .as_ref()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .or_else(|| snapshot.backend_root.as_ref().map(|root| root.join("logs")))
+        .ok_or_else(|| "Log folder is not known yet.".to_string())?;
+
+    Command::new("explorer.exe")
+        .arg(folder)
+        .spawn()
+        .map_err(|err| format!("Failed to open log folder: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_desktop(app: AppHandle) -> Result<(), String> {
+    stop_owned_backend(&app);
+    app.exit(0);
+    Ok(())
+}
+
+fn create_startup_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    WebviewWindowBuilder::new(
+        app,
+        STARTUP_LABEL,
+        WebviewUrl::CustomProtocol(STARTUP_URL.parse().expect("valid startup URL")),
+    )
+    .title("Starting Odysseus")
+    .inner_size(520.0, 420.0)
+    .min_inner_size(480.0, 360.0)
+    .build()?;
+    Ok(())
+}
+
+fn run_desktop_startup(app: AppHandle) {
+    if let Err(err) = run_desktop_startup_inner(&app) {
+        fail_startup(&app, &err);
+    }
+}
+
+fn run_desktop_startup_inner(app: &AppHandle) -> Result<(), String> {
+    emit_startup_status(
+        app,
+        EVENT_PREPARING_BACKEND,
+        "Preparing local desktop runtime...",
+    );
+    let backend = resolve_backend_launch(app).map_err(|err| err.to_string())?;
+    record_backend(app, &backend);
+
+    emit_startup_status(
+        app,
+        EVENT_CHECKING_BACKEND,
+        "Checking for an existing Odysseus backend...",
+    );
+    if health_ok() {
+        record_reused_backend(app);
+        append_log_line(&backend.root, "Reusing existing Odysseus backend");
+        emit_startup_status(app, EVENT_OPENING_APP, "Opening Odysseus...");
+        open_main_window(app).map_err(|err| err.to_string())?;
+        close_startup_window(app);
+        return Ok(());
+    }
+
+    if port_listening() {
+        record_port_conflict(app);
+        return Err(
+            "Port 7000 is already in use, but it is not an Odysseus backend. Stop the other service and launch Odysseus again.".to_string(),
+        );
+    }
+
+    emit_startup_status(
+        app,
+        EVENT_STARTING_BACKEND,
+        "Starting the Odysseus backend...",
+    );
+    let child = start_backend(&backend).map_err(|err| err.to_string())?;
+    {
+        let state = app.state::<BackendState>();
+        let mut backend_child = state
+            .child
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        *backend_child = Some(child);
+    }
+    record_owned_backend(app);
+
+    emit_startup_status(
+        app,
+        EVENT_WAITING_FOR_HEALTH,
+        "Waiting for Odysseus to become ready...",
+    );
+    let startup_timeout = startup_timeout_for(&backend);
+    if !wait_for_health(startup_timeout) {
+        stop_owned_backend(app);
+        return Err(format!(
+            "Odysseus backend did not become healthy within {} seconds.",
+            startup_timeout.as_secs()
+        ));
+    }
+
+    emit_startup_status(app, EVENT_OPENING_APP, "Opening Odysseus...");
+    open_main_window(app).map_err(|err| err.to_string())?;
+    close_startup_window(app);
+    Ok(())
+}
+
+fn open_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    WebviewWindowBuilder::new(
+        app,
+        MAIN_LABEL,
+        WebviewUrl::External(APP_URL.parse().expect("valid Odysseus URL")),
+    )
+    .title("Odysseus")
+    .inner_size(1280.0, 860.0)
+    .min_inner_size(960.0, 640.0)
+    .build()?;
+    Ok(())
+}
+
+fn close_startup_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(STARTUP_LABEL) {
+        let _ = window.close();
+    }
+}
+
+fn emit_startup_status(app: &AppHandle, event: &str, message: &str) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.last_status = message.to_string();
+        diagnostics.last_error = None;
+    });
+    let _ = app.emit_to(STARTUP_LABEL, event, message.to_string());
+}
+
+fn fail_startup(app: &AppHandle, message: &str) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.last_status = "Startup failed".to_string();
+        diagnostics.last_error = Some(message.to_string());
+    });
+    let _ = app.emit_to(STARTUP_LABEL, EVENT_FAILED, message.to_string());
+    if let Some(window) = app.get_webview_window(STARTUP_LABEL) {
+        let _ = window.set_title("Odysseus Startup Error");
+    }
+}
+
+fn record_backend(app: &AppHandle, backend: &BackendLaunch) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.mode = if backend.python_exe.is_some() {
+            "installed".to_string()
+        } else {
+            "developer checkout".to_string()
+        };
+        diagnostics.backend_root = Some(backend.root.clone());
+        diagnostics.log_path = Some(backend.root.join("logs").join("odysseus-desktop.log"));
+        diagnostics.python_exe = backend.python_exe.clone();
+        diagnostics.wheelhouse_dir = backend.wheelhouse_dir.clone();
+        diagnostics.port_conflict = false;
+    });
+}
+
+fn record_owned_backend(app: &AppHandle) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.owned_backend = true;
+        diagnostics.reused_backend = false;
+    });
+}
+
+fn record_reused_backend(app: &AppHandle) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.owned_backend = false;
+        diagnostics.reused_backend = true;
+    });
+}
+
+fn record_port_conflict(app: &AppHandle) {
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.port_conflict = true;
+        diagnostics.owned_backend = false;
+        diagnostics.reused_backend = false;
+    });
+}
+
+fn update_diagnostics<F>(app: &AppHandle, update: F)
+where
+    F: FnOnce(&mut DesktopDiagnostics),
+{
+    let state = app.state::<BackendState>();
+    if let Ok(mut diagnostics) = state.diagnostics.lock() {
+        update(&mut diagnostics);
+    };
+}
+
+fn diagnostics_snapshot(state: &BackendState) -> DesktopDiagnostics {
+    state
+        .diagnostics
+        .lock()
+        .map(|diagnostics| diagnostics.clone())
+        .unwrap_or_default()
+}
+
+fn build_diagnostics(state: &BackendState) -> String {
+    let snapshot = diagnostics_snapshot(state);
+    let health = health_ok();
+    let port = port_listening();
+    let mut output = String::new();
+    output.push_str("Odysseus Desktop Diagnostics\n");
+    output.push_str("============================\n");
+    output.push_str(&format!("App version: {}\n", env!("CARGO_PKG_VERSION")));
+    output.push_str(&format!("Mode: {}\n", snapshot.mode));
+    output.push_str(&format!("Last status: {}\n", snapshot.last_status));
+    output.push_str(&format!(
+        "Last error: {}\n",
+        value_or_none(&snapshot.last_error)
+    ));
+    output.push_str(&format!("Owned backend: {}\n", snapshot.owned_backend));
+    output.push_str(&format!("Reused backend: {}\n", snapshot.reused_backend));
+    output.push_str(&format!("Port conflict: {}\n", snapshot.port_conflict));
+    output.push_str(&format!("Health probe healthy: {}\n", health));
+    output.push_str(&format!("Port 7000 listening: {}\n", port));
+    output.push_str(&format!(
+        "Backend root: {}\n",
+        path_value(&snapshot.backend_root)
+    ));
+    output.push_str(&format!("Log path: {}\n", path_value(&snapshot.log_path)));
+    output.push_str(&format!(
+        "Bundled Python: {}\n",
+        path_value(&snapshot.python_exe)
+    ));
+    output.push_str(&format!(
+        "Bundled wheelhouse: {}\n",
+        path_value(&snapshot.wheelhouse_dir)
+    ));
+    output.push_str("\nRedacted desktop log tail\n");
+    output.push_str("-------------------------\n");
+    output.push_str(&redacted_log_tail(snapshot.log_path.as_deref()));
+    output
+}
+
+fn value_or_none(value: &Option<String>) -> String {
+    value.clone().unwrap_or_else(|| "none".to_string())
+}
+
+fn path_value(path: &Option<PathBuf>) -> String {
+    match path {
+        Some(path) => format!("{} (exists: {})", path.display(), path.exists()),
+        None => "unknown".to_string(),
+    }
+}
+
+fn redacted_log_tail(log_path: Option<&Path>) -> String {
+    let Some(log_path) = log_path else {
+        return "Log path is not known yet.\n".to_string();
+    };
+    let Ok(contents) = fs::read_to_string(log_path) else {
+        return format!("Could not read log at {}\n", log_path.display());
+    };
+    let lines: Vec<&str> = contents.lines().collect();
+    let start = lines.len().saturating_sub(140);
+    let mut output = String::new();
+    for line in &lines[start..] {
+        output.push_str(&redact_diagnostic_line(line));
+        output.push('\n');
+    }
+    output
+}
+
+fn redact_diagnostic_line(line: &str) -> String {
+    const SENSITIVE_DIAGNOSTIC_PATTERNS: &[&str] = &[
+        "password",
+        "passwd",
+        "api_key",
+        "apikey",
+        "secret",
+        "token",
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "bearer ",
+        "private_key",
+        "credential",
+        ".env",
+        "auth.json",
+    ];
+    let lower = line.to_lowercase();
+    if SENSITIVE_DIAGNOSTIC_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+    {
+        "[redacted sensitive log line]".to_string()
+    } else {
+        line.to_string()
+    }
+}
+
+fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
     if let Some(repo_root) = find_dev_repo_root()? {
         return Ok(BackendLaunch {
             root: repo_root,
@@ -130,9 +662,7 @@ fn find_dev_repo_root() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
     Ok(None)
 }
 
-fn prepare_installed_backend(
-    app: &tauri::App,
-) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
+fn prepare_installed_backend(app: &AppHandle) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
     let resource_backend = app.path().resource_dir()?.join(BACKEND_RESOURCE_DIR);
     if !resource_backend.join("launch-windows.ps1").is_file() {
         return Err(Error::new(
@@ -374,6 +904,22 @@ fn health_ok() -> bool {
     status_ok && body_ok
 }
 
+fn port_listening() -> bool {
+    let addr: SocketAddr = match HEALTH_ADDR.parse() {
+        Ok(addr) => addr,
+        Err(_) => return false,
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(700)).is_ok()
+}
+
+fn startup_timeout_for(backend: &BackendLaunch) -> Duration {
+    if backend.python_exe.is_some() {
+        INSTALLED_STARTUP_TIMEOUT
+    } else {
+        DEV_STARTUP_TIMEOUT
+    }
+}
+
 fn wait_for_health(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -466,6 +1012,9 @@ fn stop_owned_backend(app: &tauri::AppHandle) {
     let Some(child) = guard.take() else {
         return;
     };
+    update_diagnostics(app, |diagnostics| {
+        diagnostics.owned_backend = false;
+    });
 
     kill_process_tree(child);
 }

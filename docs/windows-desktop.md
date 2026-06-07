@@ -5,8 +5,10 @@ Docker support or rebuild the frontend. It opens the existing Odysseus UI from
 `http://127.0.0.1:7000`.
 
 Phase 6 adds a managed Python runtime and bundled dependency wheelhouse to the
-unsigned installer prototype. Installed users do not need Python, Node.js,
-Rust, Docker, or a Git checkout for the core app.
+unsigned installer prototype. Phase 7 adds a small startup/recovery window so
+desktop users can see progress and copy safe diagnostics when startup fails.
+Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout
+for the core app.
 
 ## Prerequisites
 
@@ -50,6 +52,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\launch-windows.ps1 -De
 
 When the desktop shell starts the backend, closing the desktop window stops only
 that backend process tree.
+
+A small startup window appears first. It reports backend preparation, startup,
+health checks, and app opening progress before the main Odysseus window opens.
 
 ## Installed Prototype
 
@@ -95,6 +100,10 @@ normal first launch does not need PyPI. Optional Cookbook/model downloads and
 other user-triggered integrations may still use the network. This phase is not
 code-signed, not auto-updating, and not fully offline.
 
+The first installed launch can take several minutes while the venv is created,
+dependencies are installed from the bundled wheelhouse, and the backend imports
+for the first time. The startup window remains visible during that wait.
+
 If you tested the Phase 5A installer, the current installed app copies existing
 `data`, `logs`, and `.env` from `%LOCALAPPDATA%\Odysseus\backend` to the new
 `%LOCALAPPDATA%\OdysseusData\backend` runtime root when those files are not
@@ -117,6 +126,13 @@ For an installed app, the log is under:
 On first installed launch, the login page should switch to first-time setup so
 you can create your admin account in the UI. Developer/browser native launches
 still use the existing terminal setup flow.
+
+If desktop startup fails, the startup window stays open with:
+
+- Copy Diagnostics: copies a redacted startup report.
+- Open Logs: opens the Odysseus desktop log folder in Explorer.
+- Quit: exits the desktop shell and stops only a backend process started by
+  this desktop launch.
 
 Verify the backend:
 
@@ -181,6 +197,10 @@ port:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Port 7010 -BindHost 127.0.0.1
 ```
+
+The desktop shell uses port `7000`. If another non-Odysseus service is already
+listening there, the startup window reports the conflict instead of launching a
+second backend.
 
 **Norton, SmartScreen, or antivirus warnings:** Phase 6 is unsigned. Review the
 path shown by the warning, prefer locally built binaries from this repo, and
