@@ -8,6 +8,8 @@ Phase 6 adds a managed Python runtime and bundled dependency wheelhouse to the
 unsigned installer prototype. Phase 7 adds a small startup/recovery window so
 desktop users can see progress and copy safe diagnostics when startup fails.
 Phase 8 adds an installed-only venv rebuild action that preserves user data.
+Phase 9 adds a repeatable unsigned release package with SHA-256 hashes for
+private/local distribution.
 Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout
 for the core app.
 
@@ -78,6 +80,44 @@ The recommended manual-test artifact is:
 ```text
 src-tauri/target/release/bundle/nsis/Odysseus_1.0.0_x64-setup.exe
 ```
+
+## Unsigned Release Package
+
+For private/local use, create a release folder with both Windows installers,
+hashes, and unsigned-release notes:
+
+```powershell
+npm run desktop:release
+```
+
+If you already ran `npm run desktop:build`, package existing artifacts without
+building again:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-unsigned-release.ps1 -SkipBuild
+```
+
+The output is:
+
+```text
+dist/windows-unsigned/Odysseus-1.0.0/
+  Odysseus_1.0.0_x64-setup.exe
+  Odysseus_1.0.0_x64_en-US.msi
+  SHA256SUMS.txt
+  RELEASE-NOTES-unsigned-windows.md
+```
+
+Verify a copied artifact hash:
+
+```powershell
+Get-FileHash .\dist\windows-unsigned\Odysseus-1.0.0\Odysseus_1.0.0_x64-setup.exe -Algorithm SHA256
+Get-Content .\dist\windows-unsigned\Odysseus-1.0.0\SHA256SUMS.txt
+```
+
+This release package is unsigned. Windows SmartScreen, Microsoft Defender,
+Norton, or other antivirus tools may warn that the publisher is unknown. For
+private use, prefer artifacts you built locally or downloaded from a trusted
+GitHub release, and compare SHA-256 hashes before installing.
 
 When launched from the installed app, Odysseus copies its bundled backend files
 to:
@@ -209,7 +249,7 @@ The desktop shell uses port `7000`. If another non-Odysseus service is already
 listening there, the startup window reports the conflict instead of launching a
 second backend.
 
-**Norton, SmartScreen, or antivirus warnings:** Phase 6 is unsigned. Review the
+**Norton, SmartScreen, or antivirus warnings:** Phase 9 is still unsigned. Review the
 path shown by the warning, prefer locally built binaries from this repo, and
 avoid allowing unrelated PowerShell commands. Code signing is not part of this
 phase, but the build is signing-ready via `scripts/sign-windows.ps1` when
@@ -224,3 +264,7 @@ npm run desktop:build
 Phase 6 produces an unsigned prototype installer that bundles Python and the
 core dependency wheelhouse. Docker flows remain unchanged for users who prefer
 Compose.
+
+Phase 9 additionally packages the unsigned NSIS and MSI outputs into
+`dist/windows-unsigned/Odysseus-<version>/` with SHA-256 hashes and release
+notes for private/local distribution.

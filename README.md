@@ -305,6 +305,9 @@ To check desktop prerequisites without changing files, run:
 The unsigned Windows installer prototype is built with `npm run desktop:build`;
 it bundles a managed Python runtime plus core dependency wheels, and installed
 runtime state lives under `%LOCALAPPDATA%\OdysseusData`.
+For a private unsigned release folder with NSIS/MSI artifacts, SHA-256 hashes,
+and warning notes, run `npm run desktop:release`. Windows SmartScreen or
+antivirus tools may warn because these artifacts are not code-signed.
 
 ## Troubleshooting & Advanced Setup
 

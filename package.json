@@ -1,7 +1,8 @@
 {
   "scripts": {
     "desktop:dev": "tauri dev",
-    "desktop:build": "node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-python-runtime.mjs && node scripts/prepare-python-wheelhouse.mjs && tauri build"
+    "desktop:build": "node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-python-runtime.mjs && node scripts/prepare-python-wheelhouse.mjs && tauri build",
+    "desktop:release": "powershell -ExecutionPolicy Bypass -File scripts/package-windows-unsigned-release.ps1"
   },
   "repository": {
     "type": "git",
