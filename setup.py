@@ -76,6 +76,9 @@ def create_default_admin():
     if os.path.exists(auth_path):
         print("  [skip] auth.json already exists")
         return "exists"
+    if os.getenv("ODYSSEUS_SKIP_ADMIN_CREATE"):
+        print("  [skip] admin account creation deferred to the web setup screen")
+        return "deferred"
 
     try:
         import bcrypt
@@ -209,6 +212,8 @@ def main():
         print("Login with your admin credentials.\n")
     elif admin_status == "exists":
         print("Login with your existing admin credentials.\n")
+    elif admin_status == "deferred":
+        print("Create your admin account in the Odysseus setup screen.\n")
     elif admin_status == "skipped":
         print("Admin creation did not happen: dependencies are missing.\nRun 'pip install bcrypt' and rerun setup.\n")
     elif admin_status == "failed":

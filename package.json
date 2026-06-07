@@ -1,7 +1,7 @@
 {
   "scripts": {
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "node scripts/prepare-desktop-bundle.mjs && tauri build"
   },
   "repository": {
     "type": "git",

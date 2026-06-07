@@ -206,7 +206,7 @@ if ($clientCheck) {
 Write-Step "Running first-time setup"
 $desktopEnvBackup = @{}
 if ($Desktop) {
-    foreach ($key in @("ODYSSEUS_SKIP_ADMIN_PROMPT", "ODYSSEUS_SKIP_RUN_HINT")) {
+    foreach ($key in @("ODYSSEUS_SKIP_ADMIN_PROMPT", "ODYSSEUS_SKIP_RUN_HINT", "ODYSSEUS_SKIP_ADMIN_CREATE")) {
         $desktopEnvBackup[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
         [Environment]::SetEnvironmentVariable($key, "1", "Process")
     }

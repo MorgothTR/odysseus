@@ -19,6 +19,7 @@ def test_launcher_supports_desktop_checkonly_and_port_options():
     assert "[int]$Port = 7000" in script
     assert '[string]$BindHost = "127.0.0.1"' in script
     assert "if ($CheckOnly)" in script
+    assert "ODYSSEUS_SKIP_ADMIN_CREATE" in script
 
 
 def test_launcher_keeps_chromadb_client_cleanup():

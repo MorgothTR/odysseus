@@ -23,3 +23,12 @@ def test_create_default_admin_normalizes_env_username(tmp_path, monkeypatch):
     data = json.loads(auth_path.read_text(encoding="utf-8"))
     assert "adminuser" in data["users"]
     assert "AdminUser" not in data["users"]
+
+
+def test_create_default_admin_can_defer_to_web_setup(tmp_path, monkeypatch):
+    setup_module = _load_setup_module()
+    monkeypatch.setattr(setup_module, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ODYSSEUS_SKIP_ADMIN_CREATE", "1")
+
+    assert setup_module.create_default_admin() == "deferred"
+    assert not (tmp_path / "auth.json").exists()

@@ -302,6 +302,8 @@ For the experimental Windows Tauri desktop shell, see
 [`docs/windows-desktop.md`](docs/windows-desktop.md).
 To check desktop prerequisites without changing files, run:
 `powershell -ExecutionPolicy Bypass -File .\scripts\check-windows-desktop.ps1`.
+The unsigned Windows installer prototype is built with `npm run desktop:build`;
+installed runtime state lives under `%LOCALAPPDATA%\Odysseus`.
 
 ## Troubleshooting & Advanced Setup
 

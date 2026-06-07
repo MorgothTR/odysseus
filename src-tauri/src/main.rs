@@ -17,10 +17,24 @@ const HEALTH_REQUEST: &[u8] =
     b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:7000\r\nConnection: close\r\n\r\n";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+const BACKEND_RESOURCE_DIR: &str = "backend";
+const INSTALLED_APP_DIR: &str = "Odysseus";
+const PRESERVED_BACKEND_NAMES: &[&str] = &["data", "logs", "venv", ".env"];
 
 #[derive(Default)]
 struct BackendState {
     child: Mutex<Option<Child>>,
+}
+
+impl Drop for BackendState {
+    fn drop(&mut self) {
+        let Ok(mut child) = self.child.lock() else {
+            return;
+        };
+        if let Some(child) = child.take() {
+            kill_process_tree(child);
+        }
+    }
 }
 
 fn main() {
@@ -28,7 +42,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(BackendState::default())
         .setup(|app| {
-            let repo_root = find_repo_root()?;
+            let repo_root = resolve_backend_root(app)?;
             let reused = health_ok();
 
             if !reused {
@@ -73,7 +87,15 @@ fn main() {
         .expect("error while running Odysseus desktop");
 }
 
-fn find_repo_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn resolve_backend_root(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(repo_root) = find_dev_repo_root()? {
+        return Ok(repo_root);
+    }
+
+    prepare_installed_backend(app)
+}
+
+fn find_dev_repo_root() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
     let mut starts = Vec::new();
     starts.push(std::env::current_dir()?);
     if let Ok(exe) = std::env::current_exe() {
@@ -85,16 +107,95 @@ fn find_repo_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
     for start in starts {
         for dir in start.ancestors() {
             if dir.join("launch-windows.ps1").is_file() {
-                return Ok(dir.to_path_buf());
+                return Ok(Some(dir.to_path_buf()));
             }
         }
     }
 
-    Err(Error::new(
-        ErrorKind::NotFound,
-        "Could not find launch-windows.ps1 from current directory or executable path",
-    )
-    .into())
+    Ok(None)
+}
+
+fn prepare_installed_backend(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let resource_backend = app.path().resource_dir()?.join(BACKEND_RESOURCE_DIR);
+    if !resource_backend.join("launch-windows.ps1").is_file() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            format!(
+                "Could not find bundled Odysseus backend at {}",
+                resource_backend.display()
+            ),
+        )
+        .into());
+    }
+
+    let backend_root = local_app_root()?.join("backend");
+    if same_path(&resource_backend, &backend_root) {
+        fs::create_dir_all(&backend_root)?;
+    } else {
+        copy_backend_resources(&resource_backend, &backend_root)?;
+    }
+    append_log_line(
+        &backend_root,
+        &format!(
+            "Prepared installed backend from {}",
+            resource_backend.display()
+        ),
+    );
+    Ok(backend_root)
+}
+
+fn local_app_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+        Error::new(
+            ErrorKind::NotFound,
+            "LOCALAPPDATA is not set; cannot prepare installed Odysseus backend",
+        )
+    })?;
+    Ok(PathBuf::from(local_app_data).join(INSTALLED_APP_DIR))
+}
+
+fn copy_backend_resources(source: &Path, target: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if is_preserved_backend_name(&name) {
+            continue;
+        }
+        copy_backend_entry(&entry.path(), &target.join(name))?;
+    }
+    Ok(())
+}
+
+fn copy_backend_entry(source: &Path, target: &Path) -> std::io::Result<()> {
+    let metadata = fs::metadata(source)?;
+    if metadata.is_dir() {
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            copy_backend_entry(&entry.path(), &target.join(entry.file_name()))?;
+        }
+    } else if metadata.is_file() {
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(source, target)?;
+    }
+    Ok(())
+}
+
+fn is_preserved_backend_name(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    PRESERVED_BACKEND_NAMES
+        .iter()
+        .any(|preserved| name.eq_ignore_ascii_case(preserved))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn health_ok() -> bool {
@@ -202,10 +303,14 @@ fn stop_owned_backend(app: &tauri::AppHandle) {
         Ok(guard) => guard,
         Err(_) => return,
     };
-    let Some(mut child) = guard.take() else {
+    let Some(child) = guard.take() else {
         return;
     };
 
+    kill_process_tree(child);
+}
+
+fn kill_process_tree(mut child: Child) {
     let pid = child.id().to_string();
     let _ = Command::new("taskkill")
         .args(["/F", "/T", "/PID", &pid])
