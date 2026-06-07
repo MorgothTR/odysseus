@@ -1,16 +1,17 @@
 # Windows Desktop Wrapper
 
-This is the Tauri desktop shell for Odysseus on Windows. It does not bundle
-Python, change Docker support, or rebuild the frontend. It opens the existing
-Odysseus UI from `http://127.0.0.1:7000`.
+This is the Tauri desktop shell for Odysseus on Windows. It does not change
+Docker support or rebuild the frontend. It opens the existing Odysseus UI from
+`http://127.0.0.1:7000`.
 
-Phase 5A adds an unsigned installer prototype. Installed users still need
-Python 3.11+, but they do not need Node.js, Rust, Docker, or a Git checkout.
+Phase 5B adds a managed Python runtime to the unsigned installer prototype.
+Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout.
 
 ## Prerequisites
 
 - Windows 10/11 with WebView2 Runtime.
-- Python 3.11+ from <https://www.python.org/downloads/windows/>.
+- Python 3.11+ from <https://www.python.org/downloads/windows/> for developer
+  checkout and browser/native runs.
 - Node.js LTS/npm from <https://nodejs.org/> for development/builds only.
 - Rust/Cargo from <https://www.rust-lang.org/tools/install> for
   development/builds only.
@@ -58,6 +59,11 @@ npm install
 npm run desktop:build
 ```
 
+The build downloads a pinned official Python NuGet CPython runtime into
+`src-tauri/target/python-runtime`, verifies its SHA-256, stages it under
+`src-tauri/resources/python`, then bundles it into the installer. The generated
+runtime resource is ignored by Git.
+
 The recommended manual-test artifact is:
 
 ```text
@@ -68,21 +74,27 @@ When launched from the installed app, Odysseus copies its bundled backend files
 to:
 
 ```text
-%LOCALAPPDATA%\Odysseus\backend
+%LOCALAPPDATA%\OdysseusData\backend
 ```
 
 Runtime state is preserved there across app launches:
 
 ```text
-%LOCALAPPDATA%\Odysseus\backend\venv
-%LOCALAPPDATA%\Odysseus\backend\data
-%LOCALAPPDATA%\Odysseus\backend\logs
-%LOCALAPPDATA%\Odysseus\backend\.env
+%LOCALAPPDATA%\OdysseusData\backend\venv
+%LOCALAPPDATA%\OdysseusData\backend\data
+%LOCALAPPDATA%\OdysseusData\backend\logs
+%LOCALAPPDATA%\OdysseusData\backend\.env
 ```
 
-The first installed launch creates the venv and installs Python dependencies,
-so it can take several minutes and needs internet access for pip. This phase is
-not code-signed, not auto-updating, and not fully offline.
+The installed app uses the bundled Python runtime to create its own venv. The
+first installed launch still installs Python dependencies with pip, so it can
+take several minutes and needs internet access. This phase is not code-signed,
+not auto-updating, and not fully offline.
+
+If you tested the Phase 5A installer, Phase 5B copies existing `data`, `logs`,
+and `.env` from `%LOCALAPPDATA%\Odysseus\backend` to the new
+`%LOCALAPPDATA%\OdysseusData\backend` runtime root when those files are not
+already present. The venv is recreated with the bundled Python runtime.
 
 ## First Run
 
@@ -92,10 +104,10 @@ Desktop startup output is appended to:
 logs/odysseus-desktop.log
 ```
 
-For an installed Phase 5A app, the log is under:
+For an installed app, the log is under:
 
 ```text
-%LOCALAPPDATA%\Odysseus\backend\logs\odysseus-desktop.log
+%LOCALAPPDATA%\OdysseusData\backend\logs\odysseus-desktop.log
 ```
 
 On first installed launch, the login page should switch to first-time setup so
@@ -125,15 +137,17 @@ ChromaDB storage in:
 
 Developer checkout: `data/chroma`
 
-Installed prototype: `%LOCALAPPDATA%\Odysseus\backend\data\chroma`
+Installed prototype: `%LOCALAPPDATA%\OdysseusData\backend\data\chroma`
 
 Set `CHROMADB_HOST` / `CHROMADB_PORT` only when you intentionally want Odysseus
 to use a standalone ChromaDB service.
 
 ## Common Fixes
 
-**Python missing:** install Python 3.11+ and make sure the Python launcher is
-available. Re-run:
+**Python missing:** this only applies to developer checkout/browser-native runs.
+The installed desktop prototype bundles its own Python runtime. For developer
+runs, install Python 3.11+ and make sure the Python launcher is available.
+Re-run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -CheckOnly
@@ -162,10 +176,11 @@ port:
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Port 7010 -BindHost 127.0.0.1
 ```
 
-**Norton, SmartScreen, or antivirus warnings:** Phase 5A is unsigned. Review the
+**Norton, SmartScreen, or antivirus warnings:** Phase 5B is unsigned. Review the
 path shown by the warning, prefer locally built binaries from this repo, and
 avoid allowing unrelated PowerShell commands. Code signing is not part of this
-phase.
+phase, but the build is signing-ready via `scripts/sign-windows.ps1` when
+signing environment variables are configured.
 
 ## Build Smoke Test
 
@@ -173,6 +188,6 @@ phase.
 npm run desktop:build
 ```
 
-Phase 5A produces an unsigned prototype installer that still requires Python
-3.11+ and internet for first-run dependency installation. Docker flows remain
+Phase 5B produces an unsigned prototype installer that bundles Python and still
+requires internet for first-run dependency installation. Docker flows remain
 unchanged for users who prefer Compose.

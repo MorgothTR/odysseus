@@ -56,6 +56,9 @@ const EXCLUDED_FILES = new Set([
   "docker-compose.yml",
   "scripts/check-windows-desktop.ps1",
   "scripts/prepare-desktop-bundle.mjs",
+  "scripts/prepare-python-runtime.mjs",
+  "scripts/python-runtime.manifest.json",
+  "scripts/sign-windows.ps1",
 ]);
 
 function normalizeGitPath(file) {

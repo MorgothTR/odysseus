@@ -5,6 +5,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "launch-windows.ps1"
 CHECKER = ROOT / "scripts" / "check-windows-desktop.ps1"
+SIGNER = ROOT / "scripts" / "sign-windows.ps1"
 
 
 def _text(path: Path) -> str:
@@ -20,6 +21,7 @@ def test_launcher_supports_desktop_checkonly_and_port_options():
     assert '[string]$BindHost = "127.0.0.1"' in script
     assert "if ($CheckOnly)" in script
     assert "ODYSSEUS_SKIP_ADMIN_CREATE" in script
+    assert "ODYSSEUS_PYTHON_EXE" in script
 
 
 def test_launcher_keeps_chromadb_client_cleanup():
@@ -49,7 +51,7 @@ def test_windows_desktop_checker_is_read_only():
 
 
 def test_windows_scripts_do_not_use_hidden_or_encoded_powershell():
-    combined = (_text(LAUNCHER) + "\n" + _text(CHECKER)).lower()
+    combined = (_text(LAUNCHER) + "\n" + _text(CHECKER) + "\n" + _text(SIGNER)).lower()
 
     assert "-encodedcommand" not in combined
     assert "-enc " not in combined
@@ -57,7 +59,7 @@ def test_windows_scripts_do_not_use_hidden_or_encoded_powershell():
 
 
 def test_windows_scripts_do_not_call_docker():
-    combined = (_text(LAUNCHER) + "\n" + _text(CHECKER)).lower()
+    combined = (_text(LAUNCHER) + "\n" + _text(CHECKER) + "\n" + _text(SIGNER)).lower()
 
     assert "docker compose" not in combined
     assert "docker.exe" not in combined

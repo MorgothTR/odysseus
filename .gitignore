@@ -51,6 +51,7 @@ Thumbs.db
 cache/
 output.txt.txt
 src-tauri/resources/backend/
+src-tauri/resources/python/
 src-tauri/gen/
 src-tauri/target/
 

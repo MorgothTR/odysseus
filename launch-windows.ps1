@@ -102,15 +102,34 @@ $pyExe = $null
 $pyArgs = @()
 $pyVersion = $null
 
-$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-if ($pyLauncher) {
-    foreach ($v in @("-3.13", "-3.12", "-3.11")) {
-        $ver = Get-PythonVersionText $pyLauncher.Source @($v)
-        if ($ver) {
-            $pyExe = $pyLauncher.Source
-            $pyArgs = @($v)
-            $pyVersion = $ver
-            break
+$managedPython = [Environment]::GetEnvironmentVariable("ODYSSEUS_PYTHON_EXE", "Process")
+if ($managedPython) {
+    if (-not (Test-Path -LiteralPath $managedPython)) {
+        Fail "ODYSSEUS_PYTHON_EXE points to a missing Python runtime: $managedPython"
+    }
+    $ver = Get-PythonVersionText $managedPython @()
+    if (-not $ver) {
+        Fail "ODYSSEUS_PYTHON_EXE did not run successfully: $managedPython"
+    }
+    $versionParts = $ver.Split('.')
+    $major = [int]$versionParts[0]
+    $minor = [int]$versionParts[1]
+    if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 11)) {
+        Fail "ODYSSEUS_PYTHON_EXE must point to Python 3.11+; found Python $ver at $managedPython"
+    }
+    $pyExe = $managedPython
+    $pyVersion = $ver
+} else {
+    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        foreach ($v in @("-3.13", "-3.12", "-3.11")) {
+            $ver = Get-PythonVersionText $pyLauncher.Source @($v)
+            if ($ver) {
+                $pyExe = $pyLauncher.Source
+                $pyArgs = @($v)
+                $pyVersion = $ver
+                break
+            }
         }
     }
 }

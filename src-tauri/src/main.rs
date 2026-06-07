@@ -18,8 +18,17 @@ const HEALTH_REQUEST: &[u8] =
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const BACKEND_RESOURCE_DIR: &str = "backend";
-const INSTALLED_APP_DIR: &str = "Odysseus";
-const PRESERVED_BACKEND_NAMES: &[&str] = &["data", "logs", "venv", ".env"];
+const PYTHON_RESOURCE_DIR: &str = "python";
+const INSTALLED_DATA_DIR: &str = "OdysseusData";
+const LEGACY_INSTALLED_APP_DIR: &str = "Odysseus";
+const PYTHON_RUNTIME_ID_FILE: &str = "ODYSSEUS_PYTHON_RUNTIME_ID.txt";
+const PYTHON_RUNTIME_MARKER: &str = ".odysseus-desktop-python-runtime";
+const PRESERVED_BACKEND_NAMES: &[&str] = &["data", "logs", "venv", ".env", PYTHON_RUNTIME_MARKER];
+
+struct BackendLaunch {
+    root: PathBuf,
+    python_exe: Option<PathBuf>,
+}
 
 #[derive(Default)]
 struct BackendState {
@@ -42,11 +51,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(BackendState::default())
         .setup(|app| {
-            let repo_root = resolve_backend_root(app)?;
+            let backend = resolve_backend_launch(app)?;
             let reused = health_ok();
 
             if !reused {
-                let child = start_backend(&repo_root)?;
+                let child = start_backend(&backend)?;
                 let state = app.state::<BackendState>();
                 let mut backend_child = state
                     .child
@@ -63,7 +72,7 @@ fn main() {
                     .into());
                 }
             } else {
-                append_log_line(&repo_root, "Reusing existing Odysseus backend");
+                append_log_line(&backend.root, "Reusing existing Odysseus backend");
             }
 
             WebviewWindowBuilder::new(
@@ -87,9 +96,12 @@ fn main() {
         .expect("error while running Odysseus desktop");
 }
 
-fn resolve_backend_root(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn resolve_backend_launch(app: &tauri::App) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
     if let Some(repo_root) = find_dev_repo_root()? {
-        return Ok(repo_root);
+        return Ok(BackendLaunch {
+            root: repo_root,
+            python_exe: None,
+        });
     }
 
     prepare_installed_backend(app)
@@ -115,7 +127,9 @@ fn find_dev_repo_root() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
     Ok(None)
 }
 
-fn prepare_installed_backend(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn prepare_installed_backend(
+    app: &tauri::App,
+) -> Result<BackendLaunch, Box<dyn std::error::Error>> {
     let resource_backend = app.path().resource_dir()?.join(BACKEND_RESOURCE_DIR);
     if !resource_backend.join("launch-windows.ps1").is_file() {
         return Err(Error::new(
@@ -128,11 +142,33 @@ fn prepare_installed_backend(app: &tauri::App) -> Result<PathBuf, Box<dyn std::e
         .into());
     }
 
-    let backend_root = local_app_root()?.join("backend");
+    let resource_python = app.path().resource_dir()?.join(PYTHON_RESOURCE_DIR);
+    let python_exe = resource_python.join("python.exe");
+    if !python_exe.is_file() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            format!(
+                "Could not find bundled Odysseus Python runtime at {}",
+                python_exe.display()
+            ),
+        )
+        .into());
+    }
+
+    let backend_root = local_data_root()?.join("backend");
+    fs::create_dir_all(&backend_root)?;
+    migrate_legacy_installed_state(&backend_root)?;
+    let runtime_id = read_python_runtime_id(&resource_python)?;
+    let runtime_changed = python_runtime_changed(&backend_root, &runtime_id);
+
     if same_path(&resource_backend, &backend_root) {
         fs::create_dir_all(&backend_root)?;
     } else {
         copy_backend_resources(&resource_backend, &backend_root)?;
+    }
+    if runtime_changed {
+        remove_backend_venv(&backend_root)?;
+        fs::write(backend_root.join(PYTHON_RUNTIME_MARKER), runtime_id)?;
     }
     append_log_line(
         &backend_root,
@@ -141,21 +177,84 @@ fn prepare_installed_backend(app: &tauri::App) -> Result<PathBuf, Box<dyn std::e
             resource_backend.display()
         ),
     );
-    Ok(backend_root)
+    Ok(BackendLaunch {
+        root: backend_root,
+        python_exe: Some(python_exe),
+    })
 }
 
-fn local_app_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn local_app_data() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
         Error::new(
             ErrorKind::NotFound,
             "LOCALAPPDATA is not set; cannot prepare installed Odysseus backend",
         )
     })?;
-    Ok(PathBuf::from(local_app_data).join(INSTALLED_APP_DIR))
+    Ok(PathBuf::from(local_app_data))
+}
+
+fn local_data_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(local_app_data()?.join(INSTALLED_DATA_DIR))
+}
+
+fn migrate_legacy_installed_state(target: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let legacy = local_app_data()?
+        .join(LEGACY_INSTALLED_APP_DIR)
+        .join("backend");
+    if !legacy.exists() || same_path(&legacy, target) {
+        return Ok(());
+    }
+
+    fs::create_dir_all(target)?;
+    for name in ["data", "logs", ".env"] {
+        let source = legacy.join(name);
+        let destination = target.join(name);
+        if source.exists() && !destination.exists() {
+            copy_backend_entry(&source, &destination)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_python_runtime_id(resource_python: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let runtime_id_path = resource_python.join(PYTHON_RUNTIME_ID_FILE);
+    let runtime_id = fs::read_to_string(&runtime_id_path).map_err(|err| {
+        Error::new(
+            err.kind(),
+            format!(
+                "Could not read bundled Python runtime id at {}: {}",
+                runtime_id_path.display(),
+                err
+            ),
+        )
+    })?;
+    Ok(runtime_id.trim().to_string())
+}
+
+fn python_runtime_changed(backend_root: &Path, runtime_id: &str) -> bool {
+    let marker_path = backend_root.join(PYTHON_RUNTIME_MARKER);
+    match fs::read_to_string(marker_path) {
+        Ok(existing) => existing.trim() != runtime_id,
+        Err(_) => true,
+    }
+}
+
+fn remove_backend_venv(backend_root: &Path) -> std::io::Result<()> {
+    let venv = backend_root.join("venv");
+    if !venv.exists() {
+        return Ok(());
+    }
+    let metadata = fs::metadata(&venv)?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(venv)
+    } else {
+        fs::remove_file(venv)
+    }
 }
 
 fn copy_backend_resources(source: &Path, target: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(target)?;
+    remove_unpreserved_backend_entries(target)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -163,6 +262,26 @@ fn copy_backend_resources(source: &Path, target: &Path) -> Result<(), Box<dyn st
             continue;
         }
         copy_backend_entry(&entry.path(), &target.join(name))?;
+    }
+    Ok(())
+}
+
+fn remove_unpreserved_backend_entries(target: &Path) -> std::io::Result<()> {
+    if !target.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(target)? {
+        let entry = entry?;
+        if is_preserved_backend_name(&entry.file_name()) {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
     }
     Ok(())
 }
@@ -252,10 +371,17 @@ fn wait_for_health(timeout: Duration) -> bool {
     }
 }
 
-fn start_backend(repo_root: &Path) -> Result<Child, Box<dyn std::error::Error>> {
+fn start_backend(backend: &BackendLaunch) -> Result<Child, Box<dyn std::error::Error>> {
+    let repo_root = &backend.root;
     fs::create_dir_all(repo_root.join("logs"))?;
     let log_path = repo_root.join("logs").join("odysseus-desktop.log");
     append_log_line(repo_root, "Starting Odysseus backend from desktop wrapper");
+    if let Some(python_exe) = &backend.python_exe {
+        append_log_line(
+            repo_root,
+            &format!("Using bundled Python runtime at {}", python_exe.display()),
+        );
+    }
 
     let stdout = OpenOptions::new()
         .create(true)
@@ -263,7 +389,8 @@ fn start_backend(repo_root: &Path) -> Result<Child, Box<dyn std::error::Error>> 
         .open(&log_path)?;
     let stderr = stdout.try_clone()?;
 
-    let child = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .current_dir(repo_root)
         .arg("-NoProfile")
         .arg("-ExecutionPolicy")
@@ -276,8 +403,13 @@ fn start_backend(repo_root: &Path) -> Result<Child, Box<dyn std::error::Error>> 
         .arg("-BindHost")
         .arg("127.0.0.1")
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()?;
+        .stderr(Stdio::from(stderr));
+
+    if let Some(python_exe) = &backend.python_exe {
+        command.env("ODYSSEUS_PYTHON_EXE", python_exe);
+    }
+
+    let child = command.spawn()?;
 
     append_log_line(
         repo_root,
