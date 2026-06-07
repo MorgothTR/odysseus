@@ -22,6 +22,9 @@ def test_launcher_supports_desktop_checkonly_and_port_options():
     assert "if ($CheckOnly)" in script
     assert "ODYSSEUS_SKIP_ADMIN_CREATE" in script
     assert "ODYSSEUS_PYTHON_EXE" in script
+    assert "ODYSSEUS_WHEELHOUSE_DIR" in script
+    assert "--no-index" in script
+    assert "--find-links" in script
 
 
 def test_launcher_keeps_chromadb_client_cleanup():
@@ -29,7 +32,8 @@ def test_launcher_keeps_chromadb_client_cleanup():
 
     assert 'Get-PipPackageInfo $venvPy "chromadb-client"' in script
     assert "pip uninstall -y chromadb-client" in script
-    assert "pip install --force-reinstall chromadb" in script
+    assert '@("install", "--force-reinstall", "chromadb")' in script
+    assert '"--no-index", "--find-links", $wheelhouseDir, "--force-reinstall", "chromadb"' in script
 
 
 def test_windows_desktop_checker_is_read_only():

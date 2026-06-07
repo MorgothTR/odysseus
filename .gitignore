@@ -52,6 +52,7 @@ cache/
 output.txt.txt
 src-tauri/resources/backend/
 src-tauri/resources/python/
+src-tauri/resources/wheelhouse/
 src-tauri/gen/
 src-tauri/target/
 

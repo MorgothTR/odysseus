@@ -57,7 +57,9 @@ const EXCLUDED_FILES = new Set([
   "scripts/check-windows-desktop.ps1",
   "scripts/prepare-desktop-bundle.mjs",
   "scripts/prepare-python-runtime.mjs",
+  "scripts/prepare-python-wheelhouse.mjs",
   "scripts/python-runtime.manifest.json",
+  "scripts/python-wheelhouse.manifest.json",
   "scripts/sign-windows.ps1",
 ]);
 

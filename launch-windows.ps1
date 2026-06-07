@@ -156,6 +156,15 @@ if (-not $pyExe) {
 $pythonLabel = ("Using Python {0}: {1} {2}" -f $pyVersion, $pyExe, ($pyArgs -join ' ')).TrimEnd()
 Write-Host $pythonLabel
 
+$wheelhouseDir = [Environment]::GetEnvironmentVariable("ODYSSEUS_WHEELHOUSE_DIR", "Process")
+$useWheelhouse = $Desktop -and -not $CheckOnly -and $wheelhouseDir
+if ($useWheelhouse) {
+    if (-not (Test-Path -LiteralPath $wheelhouseDir -PathType Container)) {
+        Fail "ODYSSEUS_WHEELHOUSE_DIR points to a missing wheelhouse: $wheelhouseDir"
+    }
+    Write-Host "Using bundled Python wheelhouse: $wheelhouseDir"
+}
+
 if ($CheckOnly) {
     Write-Step "Windows native preflight"
     Write-Check "OK" $pythonLabel Green
@@ -205,10 +214,16 @@ if (-not (Test-Path $venvPy)) {
 }
 
 # 3. Install / update dependencies
-Write-Step "Installing dependencies (first run can take a few minutes)"
-& $venvPy -m pip install --upgrade pip --quiet
-& $venvPy -m pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) { Fail "Dependency install failed. Scroll up for the pip error." }
+if ($useWheelhouse) {
+    Write-Step "Installing dependencies from bundled wheelhouse"
+    & $venvPy -m pip install --disable-pip-version-check --no-index --find-links $wheelhouseDir -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { Fail "Dependency install from bundled wheelhouse failed. Scroll up for the pip error." }
+} else {
+    Write-Step "Installing dependencies (first run can take a few minutes)"
+    & $venvPy -m pip install --upgrade pip --quiet
+    & $venvPy -m pip install -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { Fail "Dependency install failed. Scroll up for the pip error." }
+}
 
 # chromadb-client is HTTP-only and conflicts with embedded ChromaDB. Remove it
 # from existing venvs before forcing the full chromadb package into place.
@@ -217,7 +232,11 @@ if ($clientCheck) {
     Write-Step "Replacing HTTP-only chromadb-client with embedded ChromaDB"
     & $venvPy -m pip uninstall -y chromadb-client
     if ($LASTEXITCODE -ne 0) { Fail "Failed to remove chromadb-client." }
-    & $venvPy -m pip install --force-reinstall chromadb
+    $chromaInstallArgs = @("install", "--force-reinstall", "chromadb")
+    if ($useWheelhouse) {
+        $chromaInstallArgs = @("install", "--disable-pip-version-check", "--no-index", "--find-links", $wheelhouseDir, "--force-reinstall", "chromadb")
+    }
+    & $venvPy -m pip @chromaInstallArgs
     if ($LASTEXITCODE -ne 0) { Fail "Failed to install full chromadb package." }
 }
 

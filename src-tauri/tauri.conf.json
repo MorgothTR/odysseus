@@ -18,7 +18,8 @@
     "targets": "all",
     "resources": {
       "resources/backend": "backend",
-      "resources/python": "python"
+      "resources/python": "python",
+      "resources/wheelhouse": "wheelhouse"
     },
     "windows": {
       "signCommand": {

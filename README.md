@@ -303,8 +303,8 @@ For the experimental Windows Tauri desktop shell, see
 To check desktop prerequisites without changing files, run:
 `powershell -ExecutionPolicy Bypass -File .\scripts\check-windows-desktop.ps1`.
 The unsigned Windows installer prototype is built with `npm run desktop:build`;
-it bundles a managed Python runtime, and installed runtime state lives under
-`%LOCALAPPDATA%\OdysseusData`.
+it bundles a managed Python runtime plus core dependency wheels, and installed
+runtime state lives under `%LOCALAPPDATA%\OdysseusData`.
 
 ## Troubleshooting & Advanced Setup
 

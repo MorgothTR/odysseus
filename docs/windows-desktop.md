@@ -4,8 +4,9 @@ This is the Tauri desktop shell for Odysseus on Windows. It does not change
 Docker support or rebuild the frontend. It opens the existing Odysseus UI from
 `http://127.0.0.1:7000`.
 
-Phase 5B adds a managed Python runtime to the unsigned installer prototype.
-Installed users do not need Python, Node.js, Rust, Docker, or a Git checkout.
+Phase 6 adds a managed Python runtime and bundled dependency wheelhouse to the
+unsigned installer prototype. Installed users do not need Python, Node.js,
+Rust, Docker, or a Git checkout for the core app.
 
 ## Prerequisites
 
@@ -61,8 +62,10 @@ npm run desktop:build
 
 The build downloads a pinned official Python NuGet CPython runtime into
 `src-tauri/target/python-runtime`, verifies its SHA-256, stages it under
-`src-tauri/resources/python`, then bundles it into the installer. The generated
-runtime resource is ignored by Git.
+`src-tauri/resources/python`, downloads the wheels in
+`scripts/python-wheelhouse.manifest.json` into `src-tauri/resources/wheelhouse`,
+then bundles both resources into the installer. The generated runtime and
+wheelhouse resources are ignored by Git.
 
 The recommended manual-test artifact is:
 
@@ -86,13 +89,14 @@ Runtime state is preserved there across app launches:
 %LOCALAPPDATA%\OdysseusData\backend\.env
 ```
 
-The installed app uses the bundled Python runtime to create its own venv. The
-first installed launch still installs Python dependencies with pip, so it can
-take several minutes and needs internet access. This phase is not code-signed,
-not auto-updating, and not fully offline.
+The installed app uses the bundled Python runtime to create its own venv and
+installs core dependencies from the bundled wheelhouse with `--no-index`, so
+normal first launch does not need PyPI. Optional Cookbook/model downloads and
+other user-triggered integrations may still use the network. This phase is not
+code-signed, not auto-updating, and not fully offline.
 
-If you tested the Phase 5A installer, Phase 5B copies existing `data`, `logs`,
-and `.env` from `%LOCALAPPDATA%\Odysseus\backend` to the new
+If you tested the Phase 5A installer, the current installed app copies existing
+`data`, `logs`, and `.env` from `%LOCALAPPDATA%\Odysseus\backend` to the new
 `%LOCALAPPDATA%\OdysseusData\backend` runtime root when those files are not
 already present. The venv is recreated with the bundled Python runtime.
 
@@ -161,7 +165,9 @@ powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -CheckOnly
 **WebView2 missing:** install Microsoft Edge WebView2 Runtime from
 <https://developer.microsoft.com/microsoft-edge/webview2/>.
 
-**pip certificate errors:** update Windows root certificates, then retry. If npm
+**pip certificate errors:** installed desktop first launch uses bundled wheels,
+so PyPI certificate errors should not block the core app. Developer checkout
+runs still use pip online; update Windows root certificates, then retry. If npm
 has a local certificate issue, this environment has worked with:
 
 ```powershell
@@ -176,7 +182,7 @@ port:
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1 -Port 7010 -BindHost 127.0.0.1
 ```
 
-**Norton, SmartScreen, or antivirus warnings:** Phase 5B is unsigned. Review the
+**Norton, SmartScreen, or antivirus warnings:** Phase 6 is unsigned. Review the
 path shown by the warning, prefer locally built binaries from this repo, and
 avoid allowing unrelated PowerShell commands. Code signing is not part of this
 phase, but the build is signing-ready via `scripts/sign-windows.ps1` when
@@ -188,6 +194,6 @@ signing environment variables are configured.
 npm run desktop:build
 ```
 
-Phase 5B produces an unsigned prototype installer that bundles Python and still
-requires internet for first-run dependency installation. Docker flows remain
-unchanged for users who prefer Compose.
+Phase 6 produces an unsigned prototype installer that bundles Python and the
+core dependency wheelhouse. Docker flows remain unchanged for users who prefer
+Compose.

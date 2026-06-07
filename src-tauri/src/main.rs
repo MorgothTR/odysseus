@@ -19,6 +19,7 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const BACKEND_RESOURCE_DIR: &str = "backend";
 const PYTHON_RESOURCE_DIR: &str = "python";
+const WHEELHOUSE_RESOURCE_DIR: &str = "wheelhouse";
 const INSTALLED_DATA_DIR: &str = "OdysseusData";
 const LEGACY_INSTALLED_APP_DIR: &str = "Odysseus";
 const PYTHON_RUNTIME_ID_FILE: &str = "ODYSSEUS_PYTHON_RUNTIME_ID.txt";
@@ -28,6 +29,7 @@ const PRESERVED_BACKEND_NAMES: &[&str] = &["data", "logs", "venv", ".env", PYTHO
 struct BackendLaunch {
     root: PathBuf,
     python_exe: Option<PathBuf>,
+    wheelhouse_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -101,6 +103,7 @@ fn resolve_backend_launch(app: &tauri::App) -> Result<BackendLaunch, Box<dyn std
         return Ok(BackendLaunch {
             root: repo_root,
             python_exe: None,
+            wheelhouse_dir: None,
         });
     }
 
@@ -155,6 +158,18 @@ fn prepare_installed_backend(
         .into());
     }
 
+    let resource_wheelhouse = app.path().resource_dir()?.join(WHEELHOUSE_RESOURCE_DIR);
+    if !resource_wheelhouse.is_dir() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            format!(
+                "Could not find bundled Odysseus wheelhouse at {}",
+                resource_wheelhouse.display()
+            ),
+        )
+        .into());
+    }
+
     let backend_root = local_data_root()?.join("backend");
     fs::create_dir_all(&backend_root)?;
     migrate_legacy_installed_state(&backend_root)?;
@@ -180,6 +195,7 @@ fn prepare_installed_backend(
     Ok(BackendLaunch {
         root: backend_root,
         python_exe: Some(python_exe),
+        wheelhouse_dir: Some(resource_wheelhouse),
     })
 }
 
@@ -382,6 +398,15 @@ fn start_backend(backend: &BackendLaunch) -> Result<Child, Box<dyn std::error::E
             &format!("Using bundled Python runtime at {}", python_exe.display()),
         );
     }
+    if let Some(wheelhouse_dir) = &backend.wheelhouse_dir {
+        append_log_line(
+            repo_root,
+            &format!(
+                "Using bundled Python wheelhouse at {}",
+                wheelhouse_dir.display()
+            ),
+        );
+    }
 
     let stdout = OpenOptions::new()
         .create(true)
@@ -407,6 +432,9 @@ fn start_backend(backend: &BackendLaunch) -> Result<Child, Box<dyn std::error::E
 
     if let Some(python_exe) = &backend.python_exe {
         command.env("ODYSSEUS_PYTHON_EXE", python_exe);
+    }
+    if let Some(wheelhouse_dir) = &backend.wheelhouse_dir {
+        command.env("ODYSSEUS_WHEELHOUSE_DIR", wheelhouse_dir);
     }
 
     let child = command.spawn()?;

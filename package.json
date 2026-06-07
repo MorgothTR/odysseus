@@ -1,7 +1,7 @@
 {
   "scripts": {
     "desktop:dev": "tauri dev",
-    "desktop:build": "node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-python-runtime.mjs && tauri build"
+    "desktop:build": "node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-python-runtime.mjs && node scripts/prepare-python-wheelhouse.mjs && tauri build"
   },
   "repository": {
     "type": "git",
