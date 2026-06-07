@@ -17,3 +17,45 @@ def test_non_string_does_not_crash():
 def test_plain_text_passes_through():
     assert strip_tool_blocks("hello world") == "hello world"
     assert parse_tool_blocks("no tools here") == []
+
+
+def test_bare_ls_function_call_parses_as_dedicated_file_tool():
+    blocks = parse_tool_blocks('ls("C:/Projects/framescan_backup/framescan")')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "ls"
+    assert blocks[0].content == "C:/Projects/framescan_backup/framescan"
+
+
+def test_bare_ls_shellish_line_parses_as_dedicated_file_tool():
+    blocks = parse_tool_blocks('ls "C:/Projects/framescan_backup/framescan"')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "ls"
+    assert blocks[0].content == "C:/Projects/framescan_backup/framescan"
+
+
+def test_bare_file_tool_parser_handles_inline_code_ticks():
+    blocks = parse_tool_blocks('`ls C:/Projects/framescan_backup/framescan`')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "ls"
+    assert blocks[0].content == "C:/Projects/framescan_backup/framescan"
+
+
+def test_bare_file_tool_parser_supports_json_style_glob():
+    blocks = parse_tool_blocks('glob({"pattern": "**/*.py", "path": "C:/Projects/example"})')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "glob"
+    assert '"pattern": "**/*.py"' in blocks[0].content
+    assert '"path": "C:/Projects/example"' in blocks[0].content
+
+
+def test_bare_file_tool_parser_does_not_add_power_tool_syntax():
+    assert parse_tool_blocks('bash("dir C:/Projects/example /b")') == []
+    assert parse_tool_blocks('python("print(1)")') == []
+
+
+def test_bare_file_tool_parser_ignores_prose_mentions():
+    assert parse_tool_blocks('I will use ls("C:/Projects/example") now.') == []

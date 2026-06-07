@@ -55,6 +55,12 @@ _TOOL_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_BARE_FILE_TOOL_NAMES = frozenset({"ls", "read_file", "grep", "glob"})
+_BARE_FILE_TOOL_SHELL_RE = re.compile(
+    r"^(ls|read_file|grep|glob)\s+(.+?)\s*$",
+    re.IGNORECASE,
+)
+
 # Pattern 5: DeepSeek DSML markup leaking into content. When deepseek
 # models can't emit structured tool_calls (e.g. we sent no tool schemas
 # that round, or the API didn't parse them), they fall back to raw
@@ -279,6 +285,108 @@ def _parse_misfenced_web_lookup(content: str) -> Optional[ToolBlock]:
         return None
     return ToolBlock("web_fetch", url)
 
+
+def _literal_jsonable(node):
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError, TypeError):
+        return None
+
+
+def _parse_bare_file_tool_call_line(line: str) -> Optional[ToolBlock]:
+    """Parse local-model bare file-tool calls such as ``ls("C:/x")``.
+
+    Some fenced-tool local models emit Python-ish or shell-ish text for simple
+    file tools even when instructed to use ```ls fences. Keep this parser
+    intentionally narrow: only dedicated file tools, only one line, no bash or
+    python aliases.
+    """
+
+    if not isinstance(line, str):
+        return None
+    text = line.strip()
+    if not text:
+        return None
+    if text.startswith("```") and text.endswith("```") and len(text) > 6:
+        text = text[3:-3].strip()
+    elif text.startswith("`") and text.endswith("`") and len(text) > 2:
+        text = text[1:-1].strip()
+    if not text or "\n" in text:
+        return None
+
+    try:
+        expr = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        expr = None
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
+        tool = expr.func.id.lower()
+        if tool not in _BARE_FILE_TOOL_NAMES:
+            return None
+        if tool in ("ls", "read_file"):
+            if len(expr.args) == 1 and not expr.keywords:
+                value = _literal_string(expr.args[0])
+                return ToolBlock(tool, value.strip()) if value else None
+            payload = {}
+            for keyword in expr.keywords:
+                if not keyword.arg:
+                    return None
+                value = _literal_jsonable(keyword.value)
+                if value is None:
+                    return None
+                payload[keyword.arg] = value
+            if payload:
+                return ToolBlock(tool, json.dumps(payload))
+            return None
+        payload = {}
+        if len(expr.args) == 1:
+            value = _literal_jsonable(expr.args[0])
+            if isinstance(value, dict):
+                payload.update(value)
+            elif isinstance(value, str):
+                payload["pattern"] = value
+            else:
+                return None
+        elif expr.args:
+            return None
+        for keyword in expr.keywords:
+            if not keyword.arg:
+                return None
+            value = _literal_jsonable(keyword.value)
+            if value is None:
+                return None
+            payload[keyword.arg] = value
+        return ToolBlock(tool, json.dumps(payload)) if payload else None
+
+    match = _BARE_FILE_TOOL_SHELL_RE.match(text)
+    if not match:
+        return None
+    tool = match.group(1).lower()
+    arg = match.group(2).strip()
+    if not arg:
+        return None
+    if (arg.startswith('"') and arg.endswith('"')) or (arg.startswith("'") and arg.endswith("'")):
+        arg = arg[1:-1].strip()
+    if not arg:
+        return None
+    if tool in ("grep", "glob") and arg.startswith("{"):
+        return ToolBlock(tool, arg)
+    return ToolBlock(tool, arg)
+
+
+def _parse_bare_file_tool_calls(text: str) -> List[ToolBlock]:
+    blocks: List[ToolBlock] = []
+    seen = set()
+    for raw_line in text.splitlines():
+        block = _parse_bare_file_tool_call_line(raw_line)
+        if not block:
+            continue
+        key = (block.tool_type, block.content)
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append(block)
+    return blocks
+
 def _parse_tool_call_block(raw: str) -> Optional[ToolBlock]:
     """Parse a [TOOL_CALL] block into a ToolBlock.
 
@@ -467,6 +575,13 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
                 blocks.append(block)
                 continue
         blocks.append(ToolBlock(tag, content))
+
+    # Local-model compatibility: bare dedicated file calls such as
+    # `ls("C:/Projects/x")` or `ls C:/Projects/x` (only if no fenced blocks
+    # found). This catches models that learned function-ish syntax but not
+    # Odysseus' fenced tool convention.
+    if not blocks:
+        blocks = _parse_bare_file_tool_calls(text)
 
     # Pattern 2: [TOOL_CALL] blocks (only if no fenced blocks found)
     if not blocks:
