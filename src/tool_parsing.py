@@ -9,6 +9,7 @@ import ast
 import json
 import logging
 import re
+import shlex
 from typing import List, Optional
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
@@ -60,6 +61,9 @@ _BARE_FILE_TOOL_SHELL_RE = re.compile(
     r"^(ls|read_file|grep|glob)\s+(.+?)\s*$",
     re.IGNORECASE,
 )
+_WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_PATH_HAS_GLOB_RE = re.compile(r"[*?\[]")
+_SHELL_META_RE = re.compile(r"(?:[|;&]|\|\||&&|>>?|<|\b2>|`|\$\(|\${)")
 
 # Pattern 5: DeepSeek DSML markup leaking into content. When deepseek
 # models can't emit structured tool_calls (e.g. we sent no tool schemas
@@ -293,6 +297,120 @@ def _literal_jsonable(node):
         return None
 
 
+def _looks_like_abs_or_relative_path(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip().strip('"\'')
+    return bool(
+        _WINDOWS_ABS_PATH_RE.match(text)
+        or text.startswith(("./", ".\\", "../", "..\\", "/", "\\"))
+    )
+
+
+def _split_shellish_file_tool_args(arg: str) -> Optional[List[str]]:
+    """Tokenize simple read-only file-tool text without accepting shell syntax."""
+
+    if not isinstance(arg, str) or not arg.strip():
+        return None
+    if "\n" in arg or _SHELL_META_RE.search(arg):
+        return None
+    try:
+        return shlex.split(arg, posix=False)
+    except ValueError:
+        return None
+
+
+def _strip_token_quotes(token: str) -> str:
+    text = (token or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1].strip()
+    return text
+
+
+def _split_glob_path(raw_path: str) -> tuple[str, str]:
+    """Return (base path, glob pattern) for a wildcard path."""
+
+    path = _strip_token_quotes(raw_path).replace("\\", "/")
+    wildcard_positions = [pos for ch in ("*", "?", "[") if (pos := path.find(ch)) >= 0]
+    if not wildcard_positions:
+        return path, "*"
+    first_wildcard = min(wildcard_positions)
+    slash = path.rfind("/", 0, first_wildcard)
+    if slash < 0:
+        return ".", path
+    base = path[:slash] or "/"
+    pattern = path[slash + 1 :] or "*"
+    return base, pattern
+
+
+def _parse_shellish_ls_or_glob(tool: str, arg: str) -> Optional[ToolBlock]:
+    tokens = _split_shellish_file_tool_args(arg)
+    if not tokens or len(tokens) != 1:
+        return None
+    raw_path = _strip_token_quotes(tokens[0])
+    if not raw_path:
+        return None
+    if _PATH_HAS_GLOB_RE.search(raw_path):
+        base, pattern = _split_glob_path(raw_path)
+        return ToolBlock("glob", json.dumps({"pattern": pattern, "path": base}))
+    return ToolBlock(tool, raw_path)
+
+
+def _parse_shellish_grep(arg: str) -> Optional[ToolBlock]:
+    tokens = _split_shellish_file_tool_args(arg)
+    if not tokens:
+        return None
+
+    pattern = None
+    path = ""
+    glob_pat = ""
+    ignore_case = False
+    i = 0
+    while i < len(tokens):
+        token = _strip_token_quotes(tokens[i])
+        if not token:
+            i += 1
+            continue
+        if token in ("-r", "-R", "--recursive", "-n", "--line-number", "--no-heading"):
+            i += 1
+            continue
+        if token in ("-i", "--ignore-case"):
+            ignore_case = True
+            i += 1
+            continue
+        if token in ("--glob", "-g"):
+            if i + 1 >= len(tokens):
+                return None
+            glob_pat = _strip_token_quotes(tokens[i + 1])
+            i += 2
+            continue
+        if token.startswith("-"):
+            return None
+        if pattern is None:
+            pattern = token
+        elif not path and _looks_like_abs_or_relative_path(token):
+            path = token
+        else:
+            return None
+        i += 1
+
+    if not pattern:
+        return None
+    payload = {"pattern": pattern}
+    if path:
+        if _PATH_HAS_GLOB_RE.search(path):
+            base, split_glob = _split_glob_path(path)
+            payload["path"] = base
+            payload["glob"] = glob_pat or split_glob
+        else:
+            payload["path"] = path
+    if glob_pat and "glob" not in payload:
+        payload["glob"] = glob_pat
+    if ignore_case:
+        payload["ignore_case"] = True
+    return ToolBlock("grep", json.dumps(payload))
+
+
 def _parse_bare_file_tool_call_line(line: str) -> Optional[ToolBlock]:
     """Parse local-model bare file-tool calls such as ``ls("C:/x")``.
 
@@ -368,8 +486,18 @@ def _parse_bare_file_tool_call_line(line: str) -> Optional[ToolBlock]:
         arg = arg[1:-1].strip()
     if not arg:
         return None
-    if tool in ("grep", "glob") and arg.startswith("{"):
-        return ToolBlock(tool, arg)
+    if tool in ("ls", "glob"):
+        shellish = _parse_shellish_ls_or_glob(tool, arg)
+        if shellish:
+            return shellish
+        return None
+    if tool == "grep":
+        shellish = _parse_shellish_grep(arg)
+        if shellish:
+            return shellish
+        if arg.startswith("{"):
+            return ToolBlock(tool, arg)
+        return None
     return ToolBlock(tool, arg)
 
 

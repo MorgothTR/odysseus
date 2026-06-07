@@ -173,7 +173,8 @@ def test_agent_loop_injects_smart_file_routing_directive(monkeypatch):
         )
     )
 
-    assert any("SMART FILE ROUTING - THIS TURN" in msg.get("content", "") for msg in sent_messages)
+    assert any("LOCAL FILE TOOL ROUTING" in msg.get("content", "") for msg in sent_messages)
+    assert any('"pattern": "TODO"' in msg.get("content", "") for msg in sent_messages)
     assert any("Done" in event.get("delta", "") for event in _events(chunks))
 
 

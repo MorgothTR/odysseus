@@ -52,6 +52,42 @@ def test_bare_file_tool_parser_supports_json_style_glob():
     assert '"path": "C:/Projects/example"' in blocks[0].content
 
 
+def test_shellish_recursive_grep_parses_as_dedicated_grep_json():
+    blocks = parse_tool_blocks('grep -r "TODO" C:/Projects/framescan_backup/framescan')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "grep"
+    assert '"pattern": "TODO"' in blocks[0].content
+    assert '"path": "C:/Projects/framescan_backup/framescan"' in blocks[0].content
+
+
+def test_shellish_grep_with_glob_filter_parses_as_dedicated_grep_json():
+    blocks = parse_tool_blocks('grep -i --glob "*.md" "todo" C:/Projects/example')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "grep"
+    assert '"pattern": "todo"' in blocks[0].content
+    assert '"path": "C:/Projects/example"' in blocks[0].content
+    assert '"glob": "*.md"' in blocks[0].content
+    assert '"ignore_case": true' in blocks[0].content
+
+
+def test_ls_wildcard_path_parses_as_glob_tool():
+    blocks = parse_tool_blocks('ls C:/Projects/framescan_backup/framescan/*.py')
+
+    assert len(blocks) == 1
+    assert blocks[0].tool_type == "glob"
+    assert '"pattern": "*.py"' in blocks[0].content
+    assert '"path": "C:/Projects/framescan_backup/framescan"' in blocks[0].content
+
+
+def test_shellish_file_parser_rejects_pipes_and_redirects():
+    assert parse_tool_blocks(
+        'grep "TODO" C:/Projects/example/*.md 2>/dev/null || echo "No files matched"'
+    ) == []
+    assert parse_tool_blocks('ls C:/Projects/example/*.md | head -50') == []
+
+
 def test_bare_file_tool_parser_does_not_add_power_tool_syntax():
     assert parse_tool_blocks('bash("dir C:/Projects/example /b")') == []
     assert parse_tool_blocks('python("print(1)")') == []

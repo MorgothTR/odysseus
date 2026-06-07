@@ -177,11 +177,20 @@ _API_AGENT_RULES = """\
   - Listing sessions: "1. [Big Chat](#session-abc123) — 2h ago, 2. [Code Review](#session-def456) — 5h ago\""""
 
 _SMART_FILE_ROUTING_DIRECTIVE = """\
-## SMART FILE ROUTING - THIS TURN
-The latest user request is plain local file browsing/searching. Use the dedicated
-file tools only: `ls`, `read_file`, `grep`, or `glob`.
+## LOCAL FILE TOOL ROUTING
+The latest user request is plain local file browsing/searching. Use only the
+dedicated file tools: `ls`, `read_file`, `grep`, or `glob`.
+Do NOT mention this routing note or tool policy to the user.
 Do NOT use `bash`, PowerShell, or `python`, and do NOT create or edit files unless
-the user explicitly asks for a write/edit/save action in a later turn."""
+the user explicitly asks for a write/edit/save action in a later turn.
+For content search, use `grep` with JSON like:
+```grep
+{"pattern": "TODO", "path": "C:/Projects/example", "ignore_case": true}
+```
+For file patterns, use `glob` with JSON like:
+```glob
+{"pattern": "**/*.py", "path": "C:/Projects/example"}
+```"""
 
 # Each tool section is keyed by tool name(s) it covers.
 # Sections with multiple tools use a tuple key.
