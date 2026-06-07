@@ -70,6 +70,9 @@ _AGENT_RULES = """\
 - Only use tools when needed. Don't search for things you already know.
 - For web lookup/search/latest/current requests, use `web_search` or `web_fetch`. Do NOT use `bash`, `python`, `curl`, `requests`, or scraping code for web lookup unless web tools are disabled or already failed.
 - These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
+- For local file/folder access, prefer dedicated tools: `ls` to list directories, `read_file` to read files, `grep` to search contents, and `glob` to find files. Do NOT use Bash or PowerShell for these ordinary file tasks when the dedicated tools are available.
+- If `ls`, `read_file`, `grep`, or `glob` are available, do not claim you lack filesystem access. Call the appropriate tool and report the actual tool result or error.
+- `powershell` is NOT an executable tool tag. If you need a shell command, the only shell tag is `bash`; for Windows paths, prefer `ls`/`read_file`/`grep`/`glob`.
 - Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
@@ -115,6 +118,7 @@ _API_AGENT_RULES = """\
 - Prefer native tool/function calling when tools are needed.
 - Only call tools when they materially help answer the request.
 - You MUST use tools to take action — do not describe what you would do. Act, don't narrate.
+- For local file/folder access, call `ls`, `read_file`, `grep`, or `glob` before considering `bash`. Do not claim you lack filesystem access when those tools are available; attempt the appropriate tool and report its result.
 - For web lookup/search/latest/current requests, call `web_search` or `web_fetch`. Do NOT use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
 - Keep answers concise unless the user asks for depth.
 - For long code or content, use document tools instead of pasting large blocks into chat.
@@ -179,7 +183,7 @@ TOOL_SECTIONS = {
 ```bash
 <shell command>
 ```
-Run any shell command. Output is returned to you. Use for: installing packages, checking files, git, system info, process management, etc.
+Run any shell command. Output is returned to you. Use for: installing packages, git, system info, process management, etc. For ordinary file listing, reading, and searching, prefer the dedicated `ls`, `read_file`, `grep`, and `glob` tools instead of shell commands.
 Do NOT use bash/curl for web lookup/search/latest/current requests when `web_search` or `web_fetch` is available.
 NEVER use bash to create or change files — no `>`/`>>` redirects, no heredocs (`cat > f << 'EOF'`), no `tee`, `sed -i`, `awk -i`, no `python -c` that writes. To CREATE or fully rewrite a file use `write_file`; to change part of an existing file use `edit_file`. Those show a diff and are the ONLY allowed way to write files. (bash is for read-only inspection: `ls`, `cat` to READ, `grep`, `git status`/`git diff`, builds, installs.)
 For LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, training, builds — anything that may take more than ~20s), make the FIRST line `#!bg` to run it in the BACKGROUND. You get a job id back immediately and are automatically re-invoked with the full output when it finishes — so you never block the chat waiting. Example:
@@ -219,6 +223,24 @@ Fetch and read the text content of a SPECIFIC URL the user names (e.g. "check ex
 <file path>
 ```
 Read a file and return its contents.""",
+
+    "ls": """\
+```ls
+<folder path>
+```
+List a directory using Odysseus file access rules. Use this for Windows paths like `C:/Projects/example` and for allowed local folders. Prefer this over `bash ls`, `dir`, or PowerShell.""",
+
+    "grep": """\
+```grep
+{"pattern": "<regex>", "path": "<folder path>", "glob": "*.py", "ignore_case": false, "max_results": 50}
+```
+Search file contents under an allowed folder. Prefer this over shell grep/rg so path confinement and output formatting are consistent.""",
+
+    "glob": """\
+```glob
+{"pattern": "**/*.py", "path": "<folder path>"}
+```
+Find files by glob pattern under an allowed folder, newest first. Prefer this over shell find/dir.""",
 
     "write_file": """\
 ```write_file
@@ -1670,7 +1692,10 @@ async def stream_agent_loop(
             f"folder. Do NOT ask the user for code or a path, and do NOT read a file "
             f"literally named \"workspace\". ALWAYS start by exploring it yourself: "
             f"run `bash` → `git ls-files` (or `ls -R`) to see the files, then "
-            f"read_file the relevant ones by path RELATIVE to the workspace."
+            f"read_file the relevant ones by path RELATIVE to the workspace.\n"
+            f"For directory listing/searching, prefer the dedicated `ls` and `glob` "
+            f"tools over `bash`; never use `powershell` because it is not an "
+            f"executable tool tag."
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _ws_note + "\n\n" + (messages[0].get("content") or "")

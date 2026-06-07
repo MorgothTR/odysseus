@@ -367,6 +367,27 @@ async function _selectAddedModelInChat(endpoint) {
   } catch (_) {}
 }
 
+function _endpointToolModeValue(ep) {
+  if (ep && ep.supports_tools === true) return 'true';
+  if (ep && ep.supports_tools === false) return 'false';
+  return '';
+}
+
+function _endpointToolModeSelect(ep) {
+  if (!ep || ep.model_type === 'image') return '';
+  const value = _endpointToolModeValue(ep);
+  const selected = (candidate) => candidate === value ? ' selected' : '';
+  return `
+    <label class="adm-ep-tool-mode" title="Native tool calling mode. Use Fenced for LM Studio/local models that ignore or mishandle native tool calls." style="display:inline-flex;align-items:center;gap:4px;font-size:10px;opacity:0.86;">
+      <span>Tools</span>
+      <select class="admin-btn-sm" data-adm-ep-tools="${esc(ep.id)}" aria-label="Native tool calling mode for ${esc(ep.name || 'endpoint')}" style="height:24px;padding:2px 5px;font-size:11px;">
+        <option value=""${selected('')}>Auto</option>
+        <option value="true"${selected('true')}>Native</option>
+        <option value="false"${selected('false')}>Fenced</option>
+      </select>
+    </label>`;
+}
+
 async function loadEndpoints() {
   const listLocal = el('adm-epList-local');
   const listApi = el('adm-epList-api');
@@ -432,6 +453,7 @@ async function loadEndpoints() {
               ${hasModels ? '<span style="font-size:10px;opacity:0.4;">Click to manage models</span>' : ''}
             </div>
             <div style="display:flex;gap:4px;align-items:center;">
+              ${_endpointToolModeSelect(ep)}
               <button class="admin-btn-sm" data-adm-toggle-ep="${ep.id}">${ep.is_enabled ? 'Disable' : 'Enable'}</button>
               <button class="admin-btn-delete" data-adm-del-ep="${ep.id}" data-adm-ep-online="${ep.online ? '1' : '0'}">Delete</button>
               ${hasModels ? '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>' : ''}
@@ -475,6 +497,24 @@ async function loadEndpoints() {
     };
     queryAll('[data-adm-toggle-ep]').forEach(btn => {
       btn.addEventListener('click', async (e) => { e.stopPropagation(); await fetch(`/api/model-endpoints/${btn.dataset.admToggleEp}`, { method: 'PATCH' }); loadEndpoints(); });
+    });
+    queryAll('[data-adm-ep-tools]').forEach(sel => {
+      sel.addEventListener('change', async (e) => {
+        e.stopPropagation();
+        const epId = sel.dataset.admEpTools;
+        const value = sel.value;
+        sel.disabled = true;
+        try {
+          await fetch(`/api/model-endpoints/${epId}`, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ supports_tools: value === '' ? null : value === 'true' }),
+          });
+        } finally {
+          await loadEndpoints();
+        }
+      });
     });
     queryAll('[data-adm-copy-url]').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -535,7 +575,7 @@ async function loadEndpoints() {
         // Don't let interactions inside the expanded panel re-fire the
         // expand/collapse handler — the search box was getting closed
         // because clicking it bubbled up to here.
-        if (e.target.closest('.admin-btn-sm, .admin-btn-delete, .mcp-tools-list, .mcp-tools-header, .mcp-tools-search, input, label')) return;
+        if (e.target.closest('.admin-btn-sm, .admin-btn-delete, .mcp-tools-list, .mcp-tools-header, .mcp-tools-search, input, select, label')) return;
         const epId = header.dataset.admEpHeader;
         const panel = row.querySelector(`[data-adm-ep-models-panel="${epId}"]`);
         if (!panel) return;
