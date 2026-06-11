@@ -366,6 +366,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_diagnostics,
             open_desktop_log_folder,
+            open_research_report,
             retry_desktop_startup,
             rebuild_desktop_venv_and_retry,
             quit_desktop
@@ -415,6 +416,44 @@ fn open_desktop_log_folder(state: State<'_, BackendState>) -> Result<(), String>
         .arg(folder)
         .spawn()
         .map_err(|err| format!("Failed to open log folder: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_research_report(app: AppHandle, session_id: String) -> Result<(), String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty()
+        || session_id.len() > 128
+        || !session_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    {
+        return Err("Invalid research session id.".to_string());
+    }
+
+    let label = format!("research-report-{session_id}");
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .set_focus()
+            .map_err(|err| format!("Failed to focus research report window: {err}"))?;
+        return Ok(());
+    }
+
+    let report_url = format!("{APP_URL}/api/research/report/{session_id}");
+    WebviewWindowBuilder::new(
+        &app,
+        label,
+        WebviewUrl::External(
+            report_url
+                .parse()
+                .map_err(|err| format!("Invalid research report URL: {err}"))?,
+        ),
+    )
+    .title("Odysseus Research Report")
+    .inner_size(1180.0, 820.0)
+    .min_inner_size(860.0, 560.0)
+    .build()
+    .map_err(|err| format!("Failed to open research report window: {err}"))?;
     Ok(())
 }
 

@@ -54,6 +54,7 @@ def test_startup_progress_events_and_commands_are_registered():
     for command in [
         "desktop_diagnostics",
         "open_desktop_log_folder",
+        "open_research_report",
         "retry_desktop_startup",
         "rebuild_desktop_venv_and_retry",
         "quit_desktop",
@@ -62,6 +63,30 @@ def test_startup_progress_events_and_commands_are_registered():
 
     assert "tauri::generate_handler![" in main
     assert "emit_to(STARTUP_LABEL" in main
+
+
+def test_desktop_research_report_opens_dedicated_window_without_new_permissions():
+    main = _text(TAURI_MAIN)
+    helper = _text(ROOT / "static" / "js" / "research" / "reportOpen.js")
+    panel = _text(ROOT / "static" / "js" / "research" / "panel.js")
+    chat_renderer = _text(ROOT / "static" / "js" / "chatRenderer.js")
+    capability = json.loads(_text(TAURI_CAPABILITY))
+    cargo = _text(TAURI_CARGO).lower()
+
+    assert "fn open_research_report" in main
+    assert 'format!("research-report-{session_id}")' in main
+    assert "WebviewUrl::External(" in _function_body(main, "open_research_report")
+    assert "ch.is_ascii_alphanumeric() || ch == '-'" in main
+    assert "open_research_report" in helper
+    assert "window.location.assign(url)" in helper
+    assert "window.open(url, '_blank', 'noopener,noreferrer')" in helper
+    assert "openResearchReport(job.id)" in panel
+    assert "window.open(`${_apiBase}/api/research/report/${job.id}`" not in panel
+    assert "openResearchReport(sessionId)" in chat_renderer
+    assert capability["permissions"] == ["core:default", "dialog:allow-open"]
+    assert "tauri-plugin-shell" not in cargo
+    assert "tauri-plugin-fs" not in cargo
+    assert "tauri-plugin-opener" not in cargo
 
 
 def test_startup_window_capability_does_not_expand_plugin_permissions():
