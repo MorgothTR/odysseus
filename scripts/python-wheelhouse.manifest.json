@@ -100,9 +100,9 @@
       "sha256": "a5d17b1060974d36251ea4faf388233eca8acf0d09cbd92d35f4c4ac8f279960"
     },
     {
-      "filename": "cryptography-48.0.0-cp311-abi3-win_amd64.whl",
-      "size": 3817107,
-      "sha256": "5b012212e08b8dd5edc78ef54da83dd9892fd9105323b3993eff6bea65dc21d7"
+      "filename": "cryptography-48.0.1-cp311-abi3-win_amd64.whl",
+      "size": 3817138,
+      "sha256": "39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24"
     },
     {
       "filename": "defusedxml-0.7.1-py2.py3-none-any.whl",
@@ -130,9 +130,9 @@
       "sha256": "40bee672657574a1009e35ec50030a55f2b426842cb011845379817641bbbbd0"
     },
     {
-      "filename": "filelock-3.29.1-py3-none-any.whl",
-      "size": 40750,
-      "sha256": "85199dfd706869641b72b2e8955d5416a4b2b7dc4b0e8e6d97b4cc1299a6983b"
+      "filename": "filelock-3.29.3-py3-none-any.whl",
+      "size": 42324,
+      "sha256": "e58333029cc9b925f39aad59b1d8f0a1ad836af4e60d7217f4a4dba87461261d"
     },
     {
       "filename": "flatbuffers-25.12.19-py2.py3-none-any.whl",
@@ -160,9 +160,9 @@
       "sha256": "3c8bb982ad117d29478ef8f5533e97df21f1e2befd17a299257b0c96d1371c0b"
     },
     {
-      "filename": "grpcio-1.81.0-cp312-cp312-win_amd64.whl",
-      "size": 4929958,
-      "sha256": "87e33b7afcfb3585121b5f007d2c52b8c534104d18f556e840d35193ca2a9141"
+      "filename": "grpcio-1.81.1-cp312-cp312-win_amd64.whl",
+      "size": 4930461,
+      "sha256": "3ad74f8bb1a18963914c5452d289422830b39459e8776ebbcd207be1fbfb1d94"
     },
     {
       "filename": "h11-0.16.0-py3-none-any.whl",
@@ -170,9 +170,9 @@
       "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
     },
     {
-      "filename": "hf_xet-1.5.0-cp37-abi3-win_amd64.whl",
-      "size": 3977238,
-      "sha256": "2806c7c17b4d23f8d88f7c4814f838c3b6150773fe339c20af23e1cfaf2797e4"
+      "filename": "hf_xet-1.5.1-cp37-abi3-win_amd64.whl",
+      "size": 4026419,
+      "sha256": "f7b3002f95d1c13e24bcb4537baa8f0eb3838957067c91bb4959bc004a6435f5"
     },
     {
       "filename": "httpcore-1.0.9-py3-none-any.whl",
@@ -195,9 +195,9 @@
       "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
     },
     {
-      "filename": "huggingface_hub-1.18.0-py3-none-any.whl",
-      "size": 684411,
-      "sha256": "729be4a976fb706dcc02d176bcda8a3f32bdf21a294e8f4b3dda6fbcbc9c1ab1"
+      "filename": "huggingface_hub-1.19.0-py3-none-any.whl",
+      "size": 693398,
+      "sha256": "1dc72e1f6b4d6df6b30eb72e57d00514ef453d660f04af2b87f0e67267f31ee0"
     },
     {
       "filename": "icalendar_searcher-1.0.6-py3-none-any.whl",
@@ -290,9 +290,9 @@
       "sha256": "45e6a65dc88a300a2e3502cb9c8e6d1d6b831d6fba7470643333609c6aab1f30"
     },
     {
-      "filename": "niquests-3.19.0-py3-none-any.whl",
-      "size": 210982,
-      "sha256": "d75efeedda74be9718b2e3508d8c900bd411a3f554c57e3b4d24d9245fc37a1f"
+      "filename": "niquests-3.19.1-py3-none-any.whl",
+      "size": 211349,
+      "sha256": "ed04a8e2813f0b12f2ec82982c500fd115499b88d1abfa689fc9116ecdc68ede"
     },
     {
       "filename": "numpy-2.4.6-cp312-cp312-win_amd64.whl",
@@ -420,9 +420,9 @@
       "sha256": "81c2e5865b8ac55e825b0358e496e1d9387c811e85bb40e71a3b29b288963612"
     },
     {
-      "filename": "pypdf-6.13.0-py3-none-any.whl",
-      "size": 345958,
-      "sha256": "de1294ae49d6956edb4e5c41527fb9e8716ddd2b120f2185c68aab784d4ffe60"
+      "filename": "pypdf-6.13.2-py3-none-any.whl",
+      "size": 346555,
+      "sha256": "6eeb9e57693f29d41bd01255d02660cbbb41fd7fc818a982677389a35e4f2083"
     },
     {
       "filename": "pypika-0.51.1-py2.py3-none-any.whl",
@@ -535,9 +535,9 @@
       "sha256": "3f4dd50d8aed2771a091f3a83000323fc3844541c16b4fe585ae2420cc6df973"
     },
     {
-      "filename": "starlette-1.2.1-py3-none-any.whl",
-      "size": 73350,
-      "sha256": "4de0082d08c8f6764a85a54cf1120d6939507a19905c7768acad2a9f875d2b89"
+      "filename": "starlette-1.3.0-py3-none-any.whl",
+      "size": 73492,
+      "sha256": "ff4ca1bc23de6a45cdfbbeb9b3caaea524c9221cdd8a6684ad7a4f651a83890b"
     },
     {
       "filename": "tenacity-9.1.4-py3-none-any.whl",
@@ -550,9 +550,9 @@
       "sha256": "e7bfaf995c1bdbbd21d13539decb6650967013759318627d85daeb7881af16b7"
     },
     {
-      "filename": "tqdm-4.68.1-py3-none-any.whl",
-      "size": 78354,
-      "sha256": "fea4a90e4023f764914569f7802a297277c5ab1a66be5144143e142e1a4031d8"
+      "filename": "tqdm-4.68.2-py3-none-any.whl",
+      "size": 78578,
+      "sha256": "d4240441fb5353290b87d6a85968c9decc131a99b8c7faa28269d829de669ede"
     },
     {
       "filename": "typer-0.25.1-py3-none-any.whl",
@@ -590,9 +590,9 @@
       "sha256": "ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f"
     },
     {
-      "filename": "wassima-2.1.0-py3-none-any.whl",
-      "size": 128092,
-      "sha256": "4e8bc4b439f91f4da24bd2260be662fcb42d1cc439d7678420237d314e55a854"
+      "filename": "wassima-2.1.1-py3-none-any.whl",
+      "size": 131435,
+      "sha256": "ab0f12c091ff697f111eea5f925aafd83736909a1c9c764a8bbf874b2e4d4a42"
     },
     {
       "filename": "watchfiles-1.2.0-cp312-cp312-win_amd64.whl",
