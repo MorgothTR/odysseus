@@ -29,6 +29,7 @@ def _make_researcher():
 def _install_search_fakes(monkeypatch, *, chain, call_provider):
     providers_mod = types.ModuleType("src.search.providers")
     providers_mod._get_search_settings = lambda: {"search_provider": chain[0]}
+    providers_mod._get_search_instance = lambda: "http://localhost:8080"
     core_mod = types.ModuleType("src.search.core")
     core_mod._build_provider_chain = lambda provider: list(chain)
     core_mod._call_provider = call_provider
@@ -43,6 +44,7 @@ def test_empty_results_without_exception_record_reason(monkeypatch):
         chain=["searxng", "duckduckgo"],
         call_provider=lambda prov, query, n: [],
     )
+    monkeypatch.setattr("src.deep_research._searxng_reachable", lambda instance: True)
     r = _make_researcher()
     results = asyncio.run(r._search("anything"))
 
@@ -82,3 +84,49 @@ def test_results_are_returned_and_provider_recorded(monkeypatch):
 
     assert results == hits
     assert r.providers_used == ["brave"]
+
+
+def test_unreachable_default_searxng_is_skipped_for_research_fallback(monkeypatch):
+    calls = []
+
+    def _provider(prov, query, n):
+        calls.append(prov)
+        if prov == "duckduckgo":
+            return [{"url": "https://example.com", "title": "fallback"}]
+        raise AssertionError("unreachable SearXNG should be skipped")
+
+    _install_search_fakes(
+        monkeypatch,
+        chain=["searxng", "duckduckgo"],
+        call_provider=_provider,
+    )
+    monkeypatch.setattr("src.deep_research._searxng_reachable", lambda instance: False)
+
+    r = _make_researcher()
+    results = asyncio.run(r._search("anything"))
+
+    assert results == [{"url": "https://example.com", "title": "fallback"}]
+    assert calls == ["duckduckgo"]
+    assert r.providers_used == ["duckduckgo"]
+
+
+def test_reachable_searxng_remains_primary_for_docker_flow(monkeypatch):
+    calls = []
+
+    def _provider(prov, query, n):
+        calls.append(prov)
+        return [{"url": "https://searxng.example", "title": "primary"}]
+
+    _install_search_fakes(
+        monkeypatch,
+        chain=["searxng", "duckduckgo"],
+        call_provider=_provider,
+    )
+    monkeypatch.setattr("src.deep_research._searxng_reachable", lambda instance: True)
+
+    r = _make_researcher()
+    results = asyncio.run(r._search("anything"))
+
+    assert results == [{"url": "https://searxng.example", "title": "primary"}]
+    assert calls == ["searxng"]
+    assert r.providers_used == ["searxng"]

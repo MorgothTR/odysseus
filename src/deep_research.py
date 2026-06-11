@@ -10,9 +10,11 @@ import asyncio
 import json
 import logging
 import re
+import socket
 import time
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set
+from urllib.parse import urlparse
 
 from src.research_utils import strip_thinking, is_low_quality
 
@@ -20,6 +22,44 @@ from src.goal_based_extractor import EXTRACTOR_SYSTEM
 from src.prompt_security import untrusted_context_message
 
 logger = logging.getLogger(__name__)
+
+
+def _searxng_reachable(instance: str, timeout: float = 0.25) -> bool:
+    """Return whether the configured SearXNG TCP endpoint is reachable."""
+    try:
+        parsed = urlparse(instance or "")
+        host = parsed.hostname
+        if not host:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _research_provider_chain(primary: str, build_chain: Callable[[str], List[str]]) -> List[str]:
+    """Build the research provider chain, skipping dead local SearXNG fast."""
+    chain = build_chain(primary)
+    if not chain or chain[0] != "searxng":
+        return chain
+    try:
+        from src.search.providers import _get_search_instance
+
+        instance = _get_search_instance()
+    except Exception:
+        instance = ""
+    if _searxng_reachable(instance):
+        return chain
+    fallback = [provider for provider in chain if provider != "searxng"]
+    if fallback:
+        logger.info(
+            "Research search: skipping unreachable SearXNG at %s; trying %s",
+            instance or "unknown URL",
+            ", ".join(fallback),
+        )
+        return fallback
+    return chain
 
 
 def current_date_context() -> str:
@@ -569,8 +609,11 @@ class DeepResearcher:
                 logger.info("Search is disabled for research")
                 return []
 
-            # Try primary provider, then fallbacks
-            chain = _build_provider_chain(provider)
+            # Try primary provider, then fallbacks. In the Windows desktop
+            # no-Docker path the default SearXNG URL often points at a closed
+            # localhost:8080; skip it quickly instead of making every research
+            # round look like it failed before the no-key fallback gets a turn.
+            chain = _research_provider_chain(provider, _build_provider_chain)
             raised = False
             for prov in chain:
                 try:
