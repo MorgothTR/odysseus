@@ -186,6 +186,59 @@ def test_service_lifecycle_start_logs_list_stop(jobs_dir, tmp_path):
     assert all(r["id"] != job_id for r in bg_jobs.pending_followups())
 
 
+def test_duplicate_service_start_is_refused(jobs_dir, tmp_path):
+    # Restart loops stack multiple binders on one port (Windows SO_REUSEADDR
+    # allows it); the second identical start must point at the existing id.
+    payload = json.dumps({
+        "action": "start",
+        "command": _python_service_command("dup-svc"),
+        "cwd": str(tmp_path),
+        "name": "dup-svc",
+    })
+    first = asyncio.run(manage_processes(payload, session_id="s1", workspace=str(tmp_path)))
+    assert first["exit_code"] == 0, first
+    job_id = first["process"]["id"]
+    try:
+        second = asyncio.run(manage_processes(payload, session_id="s1", workspace=str(tmp_path)))
+        assert second["exit_code"] == 1
+        assert "ALREADY RUNNING" in second["error"]
+        assert job_id in second["error"]
+        # Same command in a DIFFERENT folder is a different service — allowed.
+        other = tmp_path / "other"
+        other.mkdir()
+        third = asyncio.run(
+            manage_processes(
+                json.dumps({
+                    "action": "start",
+                    "command": _python_service_command("dup-svc"),
+                    "cwd": str(other),
+                }),
+                session_id="s1",
+                workspace=str(tmp_path),
+            )
+        )
+        assert third["exit_code"] == 0, third
+        bg_jobs.stop(third["process"]["id"])
+    finally:
+        bg_jobs.stop(job_id)
+
+
+def test_service_logs_are_unbuffered_without_dash_u(jobs_dir, tmp_path):
+    # Services get PYTHONUNBUFFERED=1 so a python server's output reaches the
+    # log file live; without it the tail reads "(no output yet)" and agents
+    # misdiagnose a healthy idle server as broken.
+    py = Path(sys.executable).as_posix()
+    marker = "unbuffered-marker"
+    rec = bg_jobs.launch(
+        f'"{py}" -c "import time; print(\'{marker}\'); time.sleep(60)"',
+        session_id="s1", cwd=str(tmp_path), service=True,
+    )
+    try:
+        assert _wait_for(lambda: marker in (bg_jobs.tail(rec["id"], lines=10) or ""))
+    finally:
+        bg_jobs.stop(rec["id"])
+
+
 def test_instant_crash_is_reported_at_start(jobs_dir, tmp_path):
     result = asyncio.run(
         manage_processes(

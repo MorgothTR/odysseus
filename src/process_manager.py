@@ -97,12 +97,42 @@ def _tail_lines(rec: Dict[str, Any], lines: int) -> str:
     return text or "(no output yet)"
 
 
+def _same_dir(left: str, right: str) -> bool:
+    try:
+        return os.path.normcase(os.path.realpath(left or "")) == os.path.normcase(os.path.realpath(right or ""))
+    except OSError:
+        return False
+
+
 async def _start(args: Dict[str, Any], *, session_id: str, workspace: Optional[str]) -> Dict[str, Any]:
     command = str(args.get("command") or "").strip()
     if not command:
         raise ValueError('start needs a "command", e.g. {"action": "start", "command": "npm run dev"}')
     cwd = _resolve_cwd(str(args.get("cwd") or "").strip(), workspace)
     name = str(args.get("name") or "").strip()
+
+    # Refuse to stack a second copy of an identical service. Restart loops
+    # (the model misreads a quiet log or failed probe as "broken", starts it
+    # "again") otherwise pile several binders onto one port — on Windows
+    # SO_REUSEADDR lets them ALL bind, and connections then land on an
+    # arbitrary, often half-dead, copy.
+    for existing in bg_jobs.refresh().values():
+        if (existing.get("status") == "running" and existing.get("service")
+                and (existing.get("command") or "").strip() == command
+                and _same_dir(existing.get("cwd") or "", cwd)):
+            label = f" ({existing['name']})" if existing.get("name") else ""
+            return {
+                "error": (
+                    f"manage_processes: this exact service is ALREADY RUNNING as "
+                    f"`{existing['id']}`{label} — not starting a duplicate. Reuse it: check it "
+                    f"with {{\"action\": \"logs\", \"id\": \"{existing['id']}\"}}; if you really "
+                    f"want a fresh instance, first {{\"action\": \"stop\", \"id\": \"{existing['id']}\"}}. "
+                    f"A quiet log usually means a healthy idle server, not a broken one.\n"
+                    f"Current output:\n{_tail_lines(existing, _SNIPPET_LINES)}"
+                ),
+                "exit_code": 1,
+                "process": {"id": existing["id"], "status": "running"},
+            }
 
     rec = bg_jobs.launch(command, session_id=session_id, cwd=cwd, service=True, name=name)
 

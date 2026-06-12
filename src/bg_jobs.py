@@ -148,6 +148,12 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
         cwd=cwd or None,
+        # PYTHONUNBUFFERED so python jobs log LIVE. With the default block
+        # buffering nothing reaches the log file until ~8KB accumulate, so a
+        # healthy quiet server tails as "(no output yet)" — and an agent reads
+        # that as "broken" and restarts it (observed: a model stacked five
+        # http.servers on one port that way).
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
         **detached_popen_kwargs(),  # detach from the request lifecycle (setsid / DETACHED_PROCESS)
     )
 
@@ -155,6 +161,7 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         "id": job_id,
         "session_id": session_id,
         "command": command,
+        "cwd": cwd or "",
         "status": "running",       # running | done | failed | stopped
         "pid": proc.pid,
         "started_at": time.time(),
