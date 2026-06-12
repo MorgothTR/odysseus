@@ -23,8 +23,14 @@ MAX_PARALLEL_REVIEWERS = 5
 MAX_FILES_LISTED = 300
 MAX_REVIEW_FILES = 36
 MAX_FILE_BYTES = 160_000
+# Default snapshot budget is sized for modest local-model contexts. Big-context
+# models (kimi-k2.6 at 256K, etc.) can raise it per run via the snapshot_chars
+# arg — every reviewer receives the full snapshot, so a large budget multiplies
+# token spend by the reviewer count; that's why it's a dial, not the default.
 MAX_SNAPSHOT_CHARS = 32_000
+MAX_SNAPSHOT_CHARS_CEILING = 300_000
 MAX_SNIPPET_CHARS_PER_FILE = 3_500
+MAX_SNIPPET_CHARS_CEILING = 24_000
 MAX_FINAL_REPORT_CHARS = 18_000
 
 ProgressCallback = Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
@@ -91,6 +97,8 @@ class SwarmArgs:
     roles: List[str]
     model: str
     max_files: int
+    snapshot_chars: int
+    snippet_chars: int
 
 
 @dataclass
@@ -166,7 +174,23 @@ def _parse_args(content: str) -> SwarmArgs:
     goal = str(data.get("goal") or "Review code quality and identify the highest-risk issues.").strip()
     model = str(data.get("model") or "").strip()
     max_files = _clamp_int(data.get("max_files"), MAX_REVIEW_FILES, 1, 120)
-    return SwarmArgs(path=path, goal=goal, roles=_select_roles(data), model=model, max_files=max_files)
+    snapshot_chars = _clamp_int(
+        data.get("snapshot_chars"), MAX_SNAPSHOT_CHARS, 8_000, MAX_SNAPSHOT_CHARS_CEILING
+    )
+    # A raised snapshot budget with the default 3.5K per-file cap just means
+    # "more files, all shallow" — scale the per-file cap with the budget unless
+    # the caller pinned it explicitly.
+    default_snippet = _clamp_int(
+        snapshot_chars // 10, MAX_SNIPPET_CHARS_PER_FILE,
+        MAX_SNIPPET_CHARS_PER_FILE, MAX_SNIPPET_CHARS_CEILING,
+    )
+    snippet_chars = _clamp_int(
+        data.get("snippet_chars"), default_snippet, 1_000, MAX_SNIPPET_CHARS_CEILING
+    )
+    return SwarmArgs(
+        path=path, goal=goal, roles=_select_roles(data), model=model,
+        max_files=max_files, snapshot_chars=snapshot_chars, snippet_chars=snippet_chars,
+    )
 
 
 def _is_sensitive_file(path: str) -> bool:
@@ -214,7 +238,13 @@ def _iter_files(root: str) -> Iterable[str]:
             yield os.path.join(dirpath, filename)
 
 
-def _collect_snapshot(root: str, *, max_files: int = MAX_REVIEW_FILES) -> Snapshot:
+def _collect_snapshot(
+    root: str,
+    *,
+    max_files: int = MAX_REVIEW_FILES,
+    snapshot_chars: int = MAX_SNAPSHOT_CHARS,
+    snippet_chars: int = MAX_SNIPPET_CHARS_PER_FILE,
+) -> Snapshot:
     root_real = os.path.realpath(root)
     all_files: List[Tuple[str, str, int]] = []
     skipped_large = 0
@@ -240,7 +270,7 @@ def _collect_snapshot(root: str, *, max_files: int = MAX_REVIEW_FILES) -> Snapsh
     listed = [rel for _, rel, _ in sorted(all_files, key=lambda item: item[1].lower())[:MAX_FILES_LISTED]]
 
     samples: List[FileSample] = []
-    budget = MAX_SNAPSHOT_CHARS
+    budget = snapshot_chars
     for path, rel, size in all_files:
         if len(samples) >= max_files or budget <= 0:
             break
@@ -248,13 +278,13 @@ def _collect_snapshot(root: str, *, max_files: int = MAX_REVIEW_FILES) -> Snapsh
             continue
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                text = fh.read(min(MAX_SNIPPET_CHARS_PER_FILE + 1, budget + 1))
+                text = fh.read(min(snippet_chars + 1, budget + 1))
         except (OSError, UnicodeError):
             continue
         if not text:
             continue
-        if len(text) > MAX_SNIPPET_CHARS_PER_FILE:
-            text = text[:MAX_SNIPPET_CHARS_PER_FILE] + "\n... [file truncated for review snapshot]"
+        if len(text) > snippet_chars:
+            text = text[:snippet_chars] + "\n... [file truncated for review snapshot]"
         if len(text) > budget:
             text = text[:budget] + "\n... [snapshot budget exhausted]"
         budget -= len(text)
@@ -427,7 +457,12 @@ async def run_code_review_swarm(
         args = _parse_args(content)
         root = _resolve_review_root(args.path, workspace)
         await _emit(progress_cb, start, f"swarm: collecting code snapshot from {root}")
-        snapshot = await asyncio.to_thread(_collect_snapshot, root, max_files=args.max_files)
+        snapshot = await asyncio.to_thread(
+            _collect_snapshot, root,
+            max_files=args.max_files,
+            snapshot_chars=args.snapshot_chars,
+            snippet_chars=args.snippet_chars,
+        )
         if not snapshot.samples:
             return {
                 "error": "run_code_review_swarm: no reviewable text/code files found under the allowed folder",

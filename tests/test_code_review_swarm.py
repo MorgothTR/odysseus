@@ -88,6 +88,46 @@ async def test_code_review_swarm_skips_sensitive_files_before_llm(monkeypatch, t
     assert "SECRET KEY MATERIAL" not in joined
 
 
+def test_snapshot_chars_arg_widens_and_clamps():
+    from src.code_review_swarm import (
+        MAX_SNAPSHOT_CHARS,
+        MAX_SNAPSHOT_CHARS_CEILING,
+        MAX_SNIPPET_CHARS_CEILING,
+        _parse_args,
+    )
+
+    default = _parse_args(json.dumps({"path": "C:/x"}))
+    assert default.snapshot_chars == MAX_SNAPSHOT_CHARS
+    assert default.snippet_chars == 3_500
+
+    wide = _parse_args(json.dumps({"path": "C:/x", "snapshot_chars": 150_000}))
+    assert wide.snapshot_chars == 150_000
+    # Per-file cap scales with the budget unless pinned explicitly.
+    assert wide.snippet_chars == 15_000
+
+    clamped = _parse_args(json.dumps({"path": "C:/x", "snapshot_chars": 10_000_000, "snippet_chars": 99_999}))
+    assert clamped.snapshot_chars == MAX_SNAPSHOT_CHARS_CEILING
+    assert clamped.snippet_chars == MAX_SNIPPET_CHARS_CEILING
+
+
+def test_snapshot_budget_controls_collected_text(tmp_path):
+    from src.code_review_swarm import _collect_snapshot
+
+    repo = tmp_path / "project"
+    repo.mkdir()
+    for i in range(8):
+        (repo / f"mod_{i}.py").write_text(f"# module {i}\n" + ("x = 1\n" * 3000), encoding="utf-8")
+
+    small = _collect_snapshot(str(repo), snapshot_chars=8_000, snippet_chars=4_000)
+    large = _collect_snapshot(str(repo), snapshot_chars=120_000, snippet_chars=12_000)
+
+    small_total = sum(len(s.text) for s in small.samples)
+    large_total = sum(len(s.text) for s in large.samples)
+    assert small_total <= 8_000 + 100  # budget + truncation marker slack
+    assert large_total > small_total * 4
+    assert max(len(s.text) for s in large.samples) > 4_000  # deeper per-file excerpts
+
+
 @pytest.mark.asyncio
 async def test_code_review_swarm_reports_unallowed_path(monkeypatch, tmp_path):
     repo = tmp_path / "project"

@@ -157,7 +157,9 @@ FUNCTION_TOOL_SCHEMAS = [
                         "description": "Optional specialist reviewer roles, e.g. architecture, security, tests",
                         "items": {"type": "string"}
                     },
-                    "model": {"type": "string", "description": "Optional model name or model@endpoint override; defaults to Utility/Default"}
+                    "model": {"type": "string", "description": "Optional model name or model@endpoint override; defaults to Utility/Default"},
+                    "snapshot_chars": {"type": "integer", "description": "Code snapshot budget in characters sent to EVERY reviewer (default 32000, max 300000). Raise for big-context models like kimi-k2.6; large values multiply token spend by the reviewer count"},
+                    "snippet_chars": {"type": "integer", "description": "Per-file excerpt cap in characters (default scales with snapshot_chars, max 24000)"}
                 },
                 "required": ["path"]
             }
