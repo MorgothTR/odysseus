@@ -99,6 +99,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "run_code_review_swarm": "Run a read-only local code review swarm over an allowed folder. Uses 5 specialist reviewers by default (max 10), then synthesizes findings. Use for multi-agent reviews, swarm audits, code quality reviews, security/test/performance review, and repo audits. Confined to allowed local folders; does not write files.",
+    "manage_processes": "Start, list, read logs of, or stop long-running background services: dev servers (npm run dev, vite, flask, uvicorn), file watchers, emulators. Services keep running between turns; the agent is notified if one crashes. Use for 'start the dev server', 'is the server running', 'show the server logs', 'stop the server'.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
@@ -486,6 +487,17 @@ class ToolIndex:
                    "audit the repo", "audit repository", "review repository",
                    "review this repo", "review this codebase"}):
             {"run_code_review_swarm", "grep", "glob", "ls", "read_file"},
+        # Background services / dev servers. Distinct from the cookbook
+        # "serve a MODEL" hints above — these are project processes.
+        frozenset({"dev server", "dev-server", "npm run dev", "yarn dev", "pnpm dev",
+                   "vite", "next dev", "flask run", "uvicorn", "manage.py runserver",
+                   "start the server", "start a server", "run the server",
+                   "start the app", "run the app", "local server", "localhost",
+                   "keep it running", "keep running", "background process",
+                   "background service", "running processes", "server logs",
+                   "stop the server", "restart the server", "file watcher",
+                   "watch mode", "emulator", "manage_processes"}):
+            {"manage_processes", "bash"},
         # Tool on/off / panel open intent — user says "turn off shell",
         # "disable search", "open library", "show gallery", etc.
         frozenset({"turn off", "turn on", "disable", "enable",

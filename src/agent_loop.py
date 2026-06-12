@@ -218,6 +218,7 @@ For LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, t
 #!bg
 pip install openai-whisper
 ```
+`#!bg` is for commands that FINISH on their own. For a process that should KEEP RUNNING (a dev server like `npm run dev`, a file watcher, an emulator), use the `manage_processes` tool instead — it starts persistent services and can list, tail logs of, and stop them; #!bg jobs are reaped after an hour.
 SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Odysseus UI — no need to copy files out.
 NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats real newlines and `\\n` arrives as literal backslash-n, which Python parses as a line-continuation error on line 1. To run multi-line code, either use the dedicated `python` tool block above, or save to a file first with a quoted HEREDOC (`cat > /tmp/x.py << 'EOF' ... EOF`) and then `python /tmp/x.py`.""",
 
@@ -274,6 +275,22 @@ Find files by glob pattern under an allowed folder, newest first. Prefer this ov
 {"path": "<allowed folder path>", "goal": "review code quality", "agent_count": 5}
 ```
 Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files.""",
+
+    "manage_processes": """\
+```manage_processes
+{"action": "start", "command": "npm run dev", "cwd": "<allowed folder>", "name": "dev-server"}
+```
+Manage long-running background SERVICES — dev servers, file watchers, emulators, anything that should KEEP running after the command returns. (For finite long jobs like installs/builds, use `bash` with `#!bg` instead.) Other actions:
+```manage_processes
+{"action": "logs", "id": "<job id>", "lines": 80}
+```
+```manage_processes
+{"action": "list"}
+```
+```manage_processes
+{"action": "stop", "id": "<job id>"}
+```
+Started services run detached between turns. Read their output with `logs` (compile errors, startup messages, request logs); you are notified automatically if one crashes. Stop services you started once the user is done with them.""",
 
     "write_file": """\
 ```write_file

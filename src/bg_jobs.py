@@ -78,12 +78,18 @@ def _pid_alive(pid: Optional[int]) -> bool:
 
 
 def launch(command: str, session_id: str, cwd: Optional[str] = None,
-           max_runtime_s: int = DEFAULT_MAX_RUNTIME_S) -> Dict[str, Any]:
+           max_runtime_s: int = DEFAULT_MAX_RUNTIME_S,
+           service: bool = False, name: Optional[str] = None) -> Dict[str, Any]:
     """Launch `command` detached. Returns the job record (status='running').
 
     Output + the final exit code are written to files so status survives a
     server restart. The process is put in its own session (setsid) so it
     outlives the request/stream that started it.
+
+    `service=True` marks a process that is SUPPOSED to keep running (dev
+    server, watcher, emulator): it is exempt from the max-runtime reap and
+    is managed via stop()/tail() instead of awaiting completion. An exit is
+    still detected and followed up, so the agent hears about crashes.
     """
     _JOBS_DIR.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:12]
@@ -142,12 +148,14 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         "id": job_id,
         "session_id": session_id,
         "command": command,
-        "status": "running",       # running | done | failed
+        "status": "running",       # running | done | failed | stopped
         "pid": proc.pid,
         "started_at": time.time(),
         "ended_at": None,
         "exit_code": None,
         "max_runtime_s": max_runtime_s,
+        "service": bool(service),
+        "name": (name or "").strip()[:48],
         "followed_up": False,       # has the agent been re-invoked with the result?
         "log_path": str(log_path),
         "exit_path": str(exit_path),
@@ -206,8 +214,11 @@ def refresh() -> Dict[str, Dict[str, Any]]:
             rec["status"] = "done" if code == 0 else "failed"
             rec["ended_at"] = now
             changed = True
-        elif (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S):
+        elif (not rec.get("service")
+              and (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S)):
             # Runaway / stuck — reap it but STILL surface a follow-up.
+            # Services are exempt: a dev server running for hours is the
+            # point, not a runaway. They end via stop() or their own exit.
             _kill(rec.get("pid"))
             rec["status"] = "failed"
             rec["exit_code"] = -1
@@ -258,6 +269,37 @@ def get(job_id: str) -> Optional[Dict[str, Any]]:
     return rec
 
 
+def stop(job_id: str) -> Optional[Dict[str, Any]]:
+    """Deliberately stop a job/service. Kills the whole process tree and
+    marks the record followed_up — the agent initiated the stop, so the
+    monitor must not re-invoke it about the 'crash' it just caused."""
+    refresh()
+    jobs = _load()
+    rec = jobs.get(job_id)
+    if not rec:
+        return None
+    if rec.get("status") == "running":
+        _kill(rec.get("pid"))
+        rec["status"] = "stopped"
+        rec["ended_at"] = time.time()
+    rec["followed_up"] = True
+    _save(jobs)
+    out = dict(rec)
+    out["output"] = _read_output(rec)
+    return out
+
+
+def tail(job_id: str, lines: int = 60) -> Optional[str]:
+    """Most recent `lines` lines of a job's captured output (works mid-run —
+    the log file is written continuously). None if the job id is unknown."""
+    rec = _load().get(job_id)
+    if not rec:
+        return None
+    lines = max(5, min(int(lines or 60), 400))
+    text = _read_output(rec)
+    return "\n".join(text.splitlines()[-lines:])
+
+
 def list_for_session(session_id: str) -> List[Dict[str, Any]]:
     return [r for r in refresh().values() if r.get("session_id") == session_id]
 
@@ -265,10 +307,13 @@ def list_for_session(session_id: str) -> List[Dict[str, Any]]:
 def result_text(rec: Dict[str, Any]) -> str:
     """Human/agent-readable summary of a finished job, for the follow-up."""
     out = _read_output(rec)
+    label = "Background service" if rec.get("service") else "Background job"
+    if rec.get("name"):
+        label += f" '{rec['name']}'"
     if rec.get("timed_out"):
-        head = f"Background job timed out after {rec.get('max_runtime_s')}s."
+        head = f"{label} timed out after {rec.get('max_runtime_s')}s."
     elif rec.get("died"):
-        head = "Background job process died unexpectedly (no exit code)."
+        head = f"{label} process died unexpectedly (no exit code)."
     else:
-        head = f"Background job finished with exit code {rec.get('exit_code')}."
+        head = f"{label} finished with exit code {rec.get('exit_code')}."
     return f"{head}\nCommand: {rec.get('command')}\n\nOutput:\n{out or '(no output)'}"

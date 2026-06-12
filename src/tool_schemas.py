@@ -166,6 +166,25 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_processes",
+            "description": "Manage long-running background services (dev servers like 'npm run dev', file watchers, emulators): start a detached process that keeps running between turns, list services, read their recent logs, or stop one. Use for anything that should KEEP running — for finite long jobs (installs, builds, downloads) use bash with a #!bg first line instead. The agent is notified automatically if a started service crashes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["start", "list", "logs", "stop"], "description": "What to do"},
+                    "command": {"type": "string", "description": "Shell command to launch (start only), e.g. 'npm run dev'"},
+                    "cwd": {"type": "string", "description": "Working directory for the service (start only); must be inside an allowed folder"},
+                    "name": {"type": "string", "description": "Short label for the service, e.g. 'dev-server' (start only)"},
+                    "id": {"type": "string", "description": "Job/service id (logs and stop)"},
+                    "lines": {"type": "integer", "description": "Recent log lines to return (logs only; default 60, max 400)"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk under allowed roots, including admin-selected Local File Access folders. Use for creating files or full rewrites. Do not use shell redirects as a workaround if this rejects a path.",
             "parameters": {
@@ -1266,7 +1285,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")

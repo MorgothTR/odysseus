@@ -1350,6 +1350,16 @@ async def execute_tool_block(
             workspace=workspace,
             progress_cb=progress_cb,
         )
+    elif tool == "manage_processes":
+        from src.process_manager import manage_processes
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"manage_processes: {first_line}"
+        result = await manage_processes(
+            content,
+            session_id=session_id,
+            workspace=workspace,
+        )
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

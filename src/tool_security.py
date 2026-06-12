@@ -21,6 +21,7 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "glob",
     "ls",
     "run_code_review_swarm",
+    "manage_processes",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -114,6 +115,9 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     # Shell is never read-only-safe; block it explicitly so it stays out of plan
     # mode even if the schema list fails to load.
     "bash", "python",
+    # Spawns/kills detached processes — a mutator even though list/logs are
+    # read-only; the tool gate is per-tool, not per-action.
+    "manage_processes",
 }
 
 

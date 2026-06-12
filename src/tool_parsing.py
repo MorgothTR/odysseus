@@ -189,6 +189,11 @@ _TOOL_NAME_MAP = {
     "code_review_swarm": "run_code_review_swarm",
     "review_swarm": "run_code_review_swarm",
     "run_code_review_swarm": "run_code_review_swarm",
+    "manage_processes": "manage_processes",
+    "manage_process": "manage_processes",
+    "processes": "manage_processes",
+    "process_manager": "manage_processes",
+    "background_service": "manage_processes",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {
