@@ -25,20 +25,22 @@ class LLMConfig:
 
 
 # Cache for LLM responses
-def _get_cache_key(url: str, model: str, messages: List[Dict], 
-                   temperature: float, max_tokens: int) -> str:
+def _get_cache_key(url: str, model: str, messages: List[Dict],
+                   temperature: float, max_tokens: int,
+                   think: Optional[bool] = None) -> str:
     """Generate cache key for LLM requests."""
     hashable_messages = []
     for msg in messages:
         sorted_items = tuple(sorted(msg.items()))
         hashable_messages.append(sorted_items)
-    
+
     content = json.dumps({
         'url': url,
-        'model': model, 
+        'model': model,
         'messages': hashable_messages,
         'temp': temperature,
-        'max_tokens': max_tokens
+        'max_tokens': max_tokens,
+        'think': think
     }, sort_keys=True)
     return hashlib.sha256(content.encode()).hexdigest()
 
@@ -344,6 +346,7 @@ def _build_ollama_payload(
     stream: bool = False,
     tools: Optional[List[Dict]] = None,
     num_ctx: Optional[int] = None,
+    think: Optional[bool] = None,
 ) -> Dict:
     """Build the JSON payload for Ollama's /api/chat endpoint.
 
@@ -355,12 +358,19 @@ def _build_ollama_payload(
     the value is trusted (not the ``DEFAULT_CONTEXT`` fallback), so we
     don't guess for unknown models but do tell Ollama the real window
     when we know it — even if it's smaller than 2048.
+
+    ``think`` toggles a thinking model's hidden reasoning. None omits the
+    field entirely (the model's own default, today's behavior); False makes
+    utility calls spend the whole ``num_predict`` budget on the visible
+    answer instead of reasoning that non-streaming callers never see.
     """
     payload: Dict = {
         "model": model,
         "messages": _ollama_normalize_tool_messages(messages),
         "stream": stream,
     }
+    if think is not None:
+        payload["think"] = think
     options: Dict = {}
     if temperature is not None:
         options["temperature"] = temperature
@@ -377,7 +387,20 @@ def _build_ollama_payload(
 
 def _parse_ollama_response(data: dict) -> str:
     message = data.get("message") or {}
-    return message.get("content") or data.get("response") or ""
+    content = message.get("content") or data.get("response") or ""
+    if not content and (message.get("thinking") or "").strip():
+        # A thinking model spent its whole num_predict budget on hidden
+        # reasoning and never produced a visible answer. The thinking text
+        # is not the answer, so don't salvage it as one — raise so fallback
+        # chains move to the next candidate and callers see why, instead of
+        # an empty string that reads like a model bug.
+        raise HTTPException(
+            502,
+            "Model returned only hidden reasoning ('thinking') and no visible "
+            "answer — its token budget was likely consumed by reasoning. "
+            "Raise max_tokens or pass think=False for this call.",
+        )
+    return content
 
 
 def _host_match(url: str, *domains: str) -> bool:
@@ -982,9 +1005,14 @@ def normalize_model_id(endpoint_url: str, requested: str, timeout: int = LLMConf
     return None
 
 def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
-             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 
-             timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None) -> str:
-    """Synchronous LLM call with optional prompt type enhancement."""
+             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
+             timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None,
+             think: Optional[bool] = None) -> str:
+    """Synchronous LLM call with optional prompt type enhancement.
+
+    ``think`` is honored on native Ollama endpoints only (see
+    ``_build_ollama_payload``); other providers ignore it.
+    """
     h = _provider_headers(_detect_provider(url))
     # Tolerate headers that arrive as a JSON string (some sessions stored them
     # double-encoded) — otherwise h.update() throws "dictionary update sequence
@@ -1013,7 +1041,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         messages_copy = non_sys
 
     provider = _detect_provider(url)
-    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
+    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens, think)
     cached_response = _get_cached_response(cache_key)
     if cached_response:
         logger.debug(f"Returning cached response for key: {cache_key}")
@@ -1028,6 +1056,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         payload = _build_ollama_payload(
             model, messages_copy, temperature, max_tokens,
             stream=False, num_ctx=get_context_length(url, model),
+            think=think,
         )
     else:
         target_url = url
@@ -1062,6 +1091,8 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             response = msg.get("content") or msg.get("reasoning_content") or ""
         _set_cached_response(cache_key, response)
         return response
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(502, f"Unexpected schema from {target_url}: {str(data)[:400]}")
 
@@ -1140,9 +1171,14 @@ async def llm_call_async(
     headers: Optional[Dict] = None,
     timeout: int = LLMConfig.STREAM_TIMEOUT,
     max_retries: int = LLMConfig.MAX_RETRIES,
-    prompt_type: Optional[str] = None
+    prompt_type: Optional[str] = None,
+    think: Optional[bool] = None
 ) -> str:
-    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging.
+
+    ``think`` is honored on native Ollama endpoints only (see
+    ``_build_ollama_payload``); other providers ignore it.
+    """
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1159,7 +1195,7 @@ async def llm_call_async(
     else:
         messages_copy = non_sys
 
-    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
+    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens, think)
     cached_response = _get_cached_response(cache_key)
     if cached_response:
         logger.debug(f"Returning cached response for key: {cache_key}")
@@ -1177,6 +1213,7 @@ async def llm_call_async(
         payload = _build_ollama_payload(
             model, messages_copy, temperature, max_tokens,
             stream=False, num_ctx=get_context_length(url, model),
+            think=think,
         )
     else:
         target_url = url
@@ -1231,6 +1268,8 @@ async def llm_call_async(
                     response = msg.get("content") or msg.get("reasoning_content") or ""
                 _set_cached_response(cache_key, response)
                 return response
+            except HTTPException:
+                raise
             except Exception:
                 raise HTTPException(502, f"Unexpected schema from {target_url}: {str(data)[:400]}")
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:

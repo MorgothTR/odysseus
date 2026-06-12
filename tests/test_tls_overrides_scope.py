@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -42,14 +43,38 @@ ALLOWED_CALLERS = frozenset({
 })
 
 
+def _repo_python_files() -> list[str]:
+    """Repo-relative paths of the real source .py files.
+
+    Uses git's view of the tree (tracked plus untracked-but-not-ignored)
+    so gitignored build artifacts are never scanned — the Tauri packaging
+    flow leaves byte-for-byte copies of the backend under
+    src-tauri/resources/backend/ and src-tauri/target/*/backend/, which
+    are not new callers. Falls back to a directory walk with explicit
+    skips when git is unavailable (e.g. a source tarball)."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+             "--", "*.py"],
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            check=True, timeout=30,
+        ).stdout
+        return [line for line in out.splitlines() if line.strip()]
+    except (OSError, subprocess.SubprocessError):
+        skip = ("src-tauri/", "venv/", ".venv/", "node_modules/")
+        return [
+            rel for path in REPO.rglob("*.py")
+            if not (rel := path.relative_to(REPO).as_posix()).startswith(skip)
+        ]
+
+
 def _grep_files(pattern: str) -> set[str]:
     """Return the set of repo-relative .py file paths whose body matches
     `pattern`. Skips tests, the override module itself, and worktree
     scratch dirs."""
     rx = re.compile(pattern)
     hits: set[str] = set()
-    for path in REPO.rglob("*.py"):
-        rel = path.relative_to(REPO).as_posix()
+    for rel in _repo_python_files():
         if rel.startswith("tests/"):
             continue
         if rel == "src/tls_overrides.py":  # definition site, not a caller
@@ -57,7 +82,7 @@ def _grep_files(pattern: str) -> set[str]:
         if rel.startswith(".claude/") or "/.claude/" in rel:
             continue
         try:
-            body = path.read_text(encoding="utf-8", errors="ignore")
+            body = (REPO / rel).read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
         if rx.search(body):

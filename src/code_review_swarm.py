@@ -434,6 +434,10 @@ async def _call_llm(candidates: List[Candidate], messages: List[Dict[str, str]],
         max_tokens=max_tokens,
         timeout=240,
         prompt_type="code_review_swarm",
+        # Reviewers are utility calls: on native Ollama, think=False stops a
+        # thinking model (kimi-k2.6 etc.) from burning the token budget on
+        # hidden reasoning before the visible answer. Other providers ignore it.
+        think=False,
     )
 
 
