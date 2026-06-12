@@ -374,6 +374,30 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 logger = logging.getLogger(__name__)
 
 
+def _kill_proc_tree(proc: "asyncio.subprocess.Process") -> None:
+    """Kill the subprocess AND all of its descendants.
+
+    `proc.kill()` alone kills just the shell; children it spawned (e.g. a
+    `python -m http.server` the model started) survived as orphans with dead
+    pipes — and since SO_REUSEADDR lets several processes share a port on
+    Windows, the corpses then swallowed connections meant for healthy servers.
+
+    POSIX note: kill_process_tree signals the child's process GROUP, which is
+    only safe because the bash/python subprocesses are spawned with
+    start_new_session=True (session leader => own group, not the backend's).
+    """
+    from core.platform_compat import kill_process_tree
+
+    try:
+        kill_process_tree(proc.pid)
+    except Exception:
+        pass
+    try:
+        proc.kill()  # backstop if the tree kill raced the pid
+    except Exception:
+        pass
+
+
 async def _run_subprocess_streaming(
     proc: asyncio.subprocess.Process,
     *,
@@ -437,22 +461,16 @@ async def _run_subprocess_streaming(
         await asyncio.wait_for(proc.wait(), timeout=timeout)
     except asyncio.TimeoutError:
         timed_out = True
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        _kill_proc_tree(proc)
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
             pass
     except asyncio.CancelledError:
-        # User hit stop / SSE stream torn down. Kill the child so it
-        # doesn't keep running orphaned. Re-raise so the agent loop's
-        # cancellation propagates as the user expects.
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        # User hit stop / SSE stream torn down. Kill the child AND its
+        # descendants so nothing keeps running orphaned. Re-raise so the
+        # agent loop's cancellation propagates as the user expects.
+        _kill_proc_tree(proc)
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
@@ -683,6 +701,10 @@ async def _direct_fallback(
                 stderr=asyncio.subprocess.PIPE,
                 env=_subproc_env,
                 cwd=workspace or _AGENT_WORKDIR,
+                # Own session/group so the timeout/cancel tree kill targets
+                # this command's descendants, never the backend. No-op on
+                # Windows (taskkill /T walks the tree by parentage there).
+                start_new_session=True,
             )
             stdout, stderr, rc, timed_out = await _run_subprocess_streaming(
                 proc,
@@ -710,6 +732,8 @@ async def _direct_fallback(
                 stderr=asyncio.subprocess.PIPE,
                 env=_subproc_env,
                 cwd=workspace or _AGENT_WORKDIR,
+                # Same tree-kill containment as the bash tool above.
+                start_new_session=True,
             )
             stdout, stderr, rc, timed_out = await _run_subprocess_streaming(
                 proc,
