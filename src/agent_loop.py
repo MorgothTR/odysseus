@@ -282,13 +282,13 @@ Run a read-only local code review swarm over an allowed folder. Default is 5 spe
 ```
 Manage long-running background SERVICES — dev servers, file watchers, emulators, anything that should KEEP running after the command returns. (For finite long jobs like installs/builds, use `bash` with `#!bg` instead.) Other actions:
 ```manage_processes
-{"action": "logs", "id": "<job id>", "lines": 80}
+{"action": "logs", "id": "<job id or service name>", "lines": 80}
 ```
 ```manage_processes
 {"action": "list"}
 ```
 ```manage_processes
-{"action": "stop", "id": "<job id>"}
+{"action": "stop", "id": "<job id or service name>"}
 ```
 Started services run detached between turns. Read their output with `logs` (compile errors, startup messages, request logs); you are notified automatically if one crashes. Stop services you started once the user is done with them.""",
 

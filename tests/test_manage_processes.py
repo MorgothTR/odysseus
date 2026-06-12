@@ -223,6 +223,36 @@ def test_duplicate_service_start_is_refused(jobs_dir, tmp_path):
         bg_jobs.stop(job_id)
 
 
+def test_stop_accepts_terminate_alias_and_service_name(jobs_dir, tmp_path):
+    # The model's first instincts in production were {"action": "terminate"}
+    # and addressing the service by NAME — both must work.
+    start = asyncio.run(
+        manage_processes(
+            json.dumps({
+                "action": "launch",
+                "command": _python_service_command("alias-svc"),
+                "cwd": str(tmp_path),
+                "name": "alias-svc",
+            }),
+            session_id="s1",
+            workspace=str(tmp_path),
+        )
+    )
+    assert start["exit_code"] == 0, start
+    job_id = start["process"]["id"]
+    try:
+        logs = asyncio.run(manage_processes(json.dumps({"action": "tail", "id": "alias-svc"})))
+        assert logs["exit_code"] == 0
+        assert job_id in logs["output"]
+
+        stopped = asyncio.run(manage_processes(json.dumps({"action": "terminate", "id": "alias-svc"})))
+        assert stopped["exit_code"] == 0
+        assert job_id in stopped["output"]
+        assert (bg_jobs.get(job_id) or {}).get("status") == "stopped"
+    finally:
+        bg_jobs.stop(job_id)
+
+
 def test_service_logs_are_unbuffered_without_dash_u(jobs_dir, tmp_path):
     # Services get PYTHONUNBUFFERED=1 so a python server's output reaches the
     # log file live; without it the tail reads "(no output yet)" and agents

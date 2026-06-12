@@ -175,7 +175,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "command": {"type": "string", "description": "Shell command to launch (start only), e.g. 'npm run dev'"},
                     "cwd": {"type": "string", "description": "Working directory for the service (start only); must be inside an allowed folder"},
                     "name": {"type": "string", "description": "Short label for the service, e.g. 'dev-server' (start only)"},
-                    "id": {"type": "string", "description": "Job/service id (logs and stop)"},
+                    "id": {"type": "string", "description": "Job id or service name (logs and stop)"},
                     "lines": {"type": "integer", "description": "Recent log lines to return (logs only; default 60, max 400)"}
                 },
                 "required": ["action"]

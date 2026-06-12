@@ -36,6 +36,15 @@ _SNIPPET_LINES = 15
 
 _VALID_ACTIONS = ("start", "list", "logs", "stop")
 
+# Models reach for natural synonyms ("terminate", "kill", "tail") before
+# reading error text — accept them instead of bouncing the call.
+_ACTION_ALIASES = {
+    "start": "start", "run": "start", "launch": "start", "spawn": "start",
+    "list": "list", "ps": "list", "status": "list", "processes": "list",
+    "logs": "logs", "log": "logs", "tail": "logs", "output": "logs",
+    "stop": "stop", "kill": "stop", "terminate": "stop", "end": "stop", "shutdown": "stop",
+}
+
 
 def _parse_args(content: str) -> Dict[str, Any]:
     raw = (content or "").strip()
@@ -48,11 +57,12 @@ def _parse_args(content: str) -> Dict[str, Any]:
         return parsed
     # Bare-word convenience: ```manage_processes\nlist``` etc.
     word = raw.split()[0].lower()
-    if word in _VALID_ACTIONS:
-        args: Dict[str, Any] = {"action": word}
+    if word in _ACTION_ALIASES:
+        action = _ACTION_ALIASES[word]
+        args: Dict[str, Any] = {"action": action}
         rest = raw[len(word):].strip()
         if rest:
-            args["id" if word in ("logs", "stop") else "command"] = rest
+            args["id" if action in ("logs", "stop") else "command"] = rest
         return args
     raise ValueError(
         "manage_processes expects JSON like "
@@ -95,6 +105,24 @@ def _describe(rec: Dict[str, Any]) -> str:
 def _tail_lines(rec: Dict[str, Any], lines: int) -> str:
     text = bg_jobs.tail(rec["id"], lines=lines)
     return text or "(no output yet)"
+
+
+def _find_job(ident: str) -> Optional[Dict[str, Any]]:
+    """Resolve a job by id, falling back to service NAME — the model often
+    addresses a service by the name it gave it ('stop expense-dev')."""
+    rec = bg_jobs.get(ident)
+    if rec:
+        return rec
+    ident_low = ident.lower()
+    matches = [
+        r for r in bg_jobs.refresh().values()
+        if (r.get("name") or "").lower() == ident_low
+    ]
+    if not matches:
+        return None
+    # Prefer the running instance; otherwise the most recent one.
+    matches.sort(key=lambda r: (r.get("status") == "running", r.get("started_at") or 0), reverse=True)
+    return bg_jobs.get(matches[0]["id"])
 
 
 def _same_dir(left: str, right: str) -> bool:
@@ -186,18 +214,18 @@ def _list() -> Dict[str, Any]:
 
 
 def _logs(args: Dict[str, Any]) -> Dict[str, Any]:
-    job_id = str(args.get("id") or "").strip()
-    if not job_id:
-        raise ValueError('logs needs an "id" — use {"action": "list"} to find it')
+    ident = str(args.get("id") or args.get("name") or "").strip()
+    if not ident:
+        raise ValueError('logs needs an "id" or "name" — use {"action": "list"} to find it')
     lines = args.get("lines") or 60
     try:
         lines = int(lines)
     except (TypeError, ValueError):
         lines = 60
-    rec = bg_jobs.get(job_id)
+    rec = _find_job(ident)
     if not rec:
-        raise ValueError(f"no background job or service with id '{job_id}'")
-    text = bg_jobs.tail(job_id, lines=lines) or "(no output yet)"
+        raise ValueError(f"no background job or service matching '{ident}'")
+    text = bg_jobs.tail(rec["id"], lines=lines) or "(no output yet)"
     return {
         "output": f"{_describe(rec)}\n--- last output ---\n{text}",
         "exit_code": 0,
@@ -205,14 +233,15 @@ def _logs(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _stop(args: Dict[str, Any]) -> Dict[str, Any]:
-    job_id = str(args.get("id") or "").strip()
-    if not job_id:
-        raise ValueError('stop needs an "id" — use {"action": "list"} to find it')
-    rec = bg_jobs.stop(job_id)
+    ident = str(args.get("id") or args.get("name") or "").strip()
+    if not ident:
+        raise ValueError('stop needs an "id" or "name" — use {"action": "list"} to find it')
+    rec = _find_job(ident)
     if not rec:
-        raise ValueError(f"no background job or service with id '{job_id}'")
+        raise ValueError(f"no background job or service matching '{ident}'")
+    rec = bg_jobs.stop(rec["id"]) or rec
     return {
-        "output": f"Stopped `{job_id}`.\n{_describe(rec)}",
+        "output": f"Stopped `{rec['id']}`.\n{_describe(rec)}",
         "exit_code": 0,
     }
 
@@ -225,9 +254,10 @@ async def manage_processes(
 ) -> Dict[str, Any]:
     try:
         args = _parse_args(content)
-        action = str(args.get("action") or "").strip().lower()
-        if action not in _VALID_ACTIONS:
-            raise ValueError(f'unknown action \'{action}\' — use one of {", ".join(_VALID_ACTIONS)}')
+        raw_action = str(args.get("action") or "").strip().lower()
+        action = _ACTION_ALIASES.get(raw_action)
+        if action is None:
+            raise ValueError(f'unknown action \'{raw_action}\' — use one of {", ".join(_VALID_ACTIONS)}')
         if action == "start":
             if not session_id:
                 # Crash follow-ups are delivered per chat session; without one
