@@ -487,7 +487,11 @@ async def run_code_review_swarm(
                     output = await _call_llm(
                         candidates,
                         _review_messages(role, args.goal, snapshot_text),
-                        max_tokens=3000,
+                        # Generous budget: thinking models (kimi-k2.6 etc.)
+                        # spend tokens on hidden reasoning FIRST — at 3000 the
+                        # reasoning consumed the whole budget over large
+                        # snapshots and 4 of 5 reviewers returned empty text.
+                        max_tokens=9000,
                     )
                     output = output.strip() or "(reviewer returned an empty response)"
                 except Exception as exc:
@@ -502,7 +506,7 @@ async def run_code_review_swarm(
             final = await _call_llm(
                 candidates,
                 _synthesis_messages(args.goal, snapshot, reviewer_outputs),
-                max_tokens=5000,
+                max_tokens=10000,  # same thinking-model headroom as reviewers
             )
             final = final.strip()
         except Exception as exc:
