@@ -100,9 +100,9 @@
       "sha256": "a5d17b1060974d36251ea4faf388233eca8acf0d09cbd92d35f4c4ac8f279960"
     },
     {
-      "filename": "cryptography-48.0.1-cp311-abi3-win_amd64.whl",
-      "size": 3817138,
-      "sha256": "39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24"
+      "filename": "cryptography-49.0.0-cp311-abi3-win_amd64.whl",
+      "size": 3810026,
+      "sha256": "e5dfc1e64de5677cec922ffa8da89c546d0415bf6efdf081842e5d44c84e1f0e"
     },
     {
       "filename": "defusedxml-0.7.1-py2.py3-none-any.whl",
