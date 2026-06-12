@@ -1656,7 +1656,7 @@ function _renderLocalFileRoots() {
       <div class="admin-user-row" data-local-folder-row="${idx}">
         <div style="min-width:0;flex:1;">
           <div class="admin-user-name" title="${esc(path)}" style="word-break:break-all;">${esc(path)}</div>
-          <div class="admin-toggle-sub">Allowed for read_file, write_file, grep, glob, and ls</div>
+          <div class="admin-toggle-sub">Allowed for ls, read_file, grep, glob, write_file, and edit_file</div>
         </div>
         <button type="button" class="admin-btn-sm" data-local-folder-test="${idx}">Test</button>
         <button type="button" class="admin-btn-delete" data-local-folder-remove="${idx}">Remove</button>
@@ -1733,7 +1733,7 @@ async function _testLocalFileRoot(idx) {
     });
     if (!res.ok) throw new Error(await _responseErrorMessage(res, 'Test failed'));
     const data = await res.json();
-    _setLocalFileMsg(data.message || 'Folder is reachable by file tools', false);
+    _setLocalFileMsg(data.message || 'Folder is readable and writable by file tools', false);
   } catch (e) {
     _setLocalFileMsg(e.message || 'Test failed', true);
   }

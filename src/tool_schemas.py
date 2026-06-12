@@ -145,11 +145,11 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write/save a file to disk",
+            "description": "Write/save a file to disk under allowed roots, including admin-selected Local File Access folders. Use for creating files or full rewrites. Do not use shell redirects as a workaround if this rejects a path.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to write to"},
+                    "path": {"type": "string", "description": "File path to write under allowed roots, including admin-selected Local File Access folders"},
                     "content": {"type": "string", "description": "File content to write"}
                 },
                 "required": ["path", "content"]
@@ -164,7 +164,7 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to edit"},
+                    "path": {"type": "string", "description": "File path to edit under allowed roots, including admin-selected Local File Access folders"},
                     "old_string": {"type": "string", "description": "Exact text to replace (must match the file, including indentation)"},
                     "new_string": {"type": "string", "description": "Replacement text"},
                     "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of requiring a unique match"}

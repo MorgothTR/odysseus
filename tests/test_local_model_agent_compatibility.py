@@ -55,6 +55,7 @@ def test_agent_rules_prefer_dedicated_file_tools_over_shell_refusals():
 
     assert "For local file/folder access, prefer dedicated tools" in agent
     assert "do not claim you lack filesystem access" in agent
+    assert "Admin-selected Local File Access folders are valid write targets" in agent
     assert "`powershell` is NOT an executable tool tag" in agent
     assert "For local file/folder access, call `ls`, `read_file`, `grep`, or `glob` before considering `bash`" in agent
 
@@ -74,4 +75,5 @@ def test_windows_docs_explain_lm_studio_fenced_tool_mode():
     assert "LM Studio/local Agent mode will not use tools" in docs
     assert "set **Tools** to" in docs
     assert "**Fenced**" in docs
-    assert "`ls`, `read_file`, `grep`, or `glob`" in squashed
+    assert "`ls`, `read_file`, `grep`, `glob`, `write_file`, or `edit_file`" in squashed
+    assert "temporary read/write probe" in docs

@@ -231,7 +231,9 @@ Services, find the endpoint under Added Models, and set **Tools** to
 **Fenced**. This uses Odysseus fenced tool blocks instead of native
 OpenAI-style `tool_calls`, which is often more reliable for local models. For
 allowed local folders, ask the agent to use the dedicated `ls`, `read_file`,
-`grep`, or `glob` tools rather than Bash or PowerShell.
+`grep`, `glob`, `write_file`, or `edit_file` tools rather than Bash or
+PowerShell. The Local File Access test performs a temporary read/write probe and
+removes the probe file afterward.
 
 **Python missing:** this only applies to developer checkout/browser-native runs.
 The installed desktop prototype bundles its own Python runtime. For developer

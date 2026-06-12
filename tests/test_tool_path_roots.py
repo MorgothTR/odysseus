@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -116,3 +117,11 @@ def test_invalid_hand_edited_extra_roots_do_not_expand_enforcement(tmp_path):
         assert os.path.realpath(str(valid)) in roots
         assert os.path.realpath(str(invalid)) not in roots
         assert _resolve_tool_path(str(target)) == os.path.realpath(str(target))
+
+
+def test_tool_path_root_test_endpoint_exercises_write_probe():
+    auth_routes = (Path(__file__).resolve().parents[1] / "routes" / "auth_routes.py").read_text(encoding="utf-8")
+
+    assert ".odysseus-write-test-" in auth_routes
+    assert 'open(probe_resolved, "w", encoding="utf-8")' in auth_routes
+    assert "Folder is readable and writable by file tools" in auth_routes

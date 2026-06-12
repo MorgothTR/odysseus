@@ -6,6 +6,7 @@ from typing import Optional
 import asyncio
 import logging
 import os
+import uuid
 
 from core.auth import AuthManager
 from src.rate_limiter import RateLimiter
@@ -474,25 +475,40 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
 
     @router.post("/tool-path-roots/test")
     async def test_tool_path_root(request: Request, body: ToolPathRootTestRequest):
-        """Admin only: verify a local folder is reachable by file tools."""
+        """Admin only: verify a local folder is reachable and writable by file tools."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
             raise HTTPException(403, "Admin only")
+        probe_resolved = None
         try:
             normalized = normalize_tool_path_root(body.path)
             from src.tool_execution import _resolve_tool_path
             resolved = _resolve_tool_path(normalized)
             with os.scandir(resolved):
                 pass
+            probe_name = f".odysseus-write-test-{uuid.uuid4().hex}.tmp"
+            probe_resolved = _resolve_tool_path(os.path.join(resolved, probe_name))
+            with open(probe_resolved, "w", encoding="utf-8") as handle:
+                handle.write("odysseus local file access write test\n")
+            with open(probe_resolved, "r", encoding="utf-8") as handle:
+                if handle.read() != "odysseus local file access write test\n":
+                    raise OSError("write verification failed")
         except ToolPathRootError as e:
             raise HTTPException(400, str(e))
         except ValueError as e:
             raise HTTPException(400, str(e))
         except PermissionError:
-            raise HTTPException(400, "Folder exists but cannot be read by Odysseus")
+            raise HTTPException(400, "Folder exists but cannot be read and written by Odysseus")
         except OSError as e:
             raise HTTPException(400, f"Folder access failed: {e.strerror or e.__class__.__name__}")
-        return {"ok": True, "path": normalized, "message": "Folder is reachable by file tools"}
+        finally:
+            if probe_resolved:
+                try:
+                    if os.path.exists(probe_resolved):
+                        os.unlink(probe_resolved)
+                except OSError:
+                    pass
+        return {"ok": True, "path": normalized, "message": "Folder is readable and writable by file tools"}
 
     # ---- Integrations CRUD ----
 

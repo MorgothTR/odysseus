@@ -61,7 +61,7 @@ def _load_mcp_disabled_map() -> Dict[str, set]:
 # Always injected — the LLM decides whether to use them.
 _AGENT_PREAMBLE = """\
 You are an AI assistant with tool access. You can run shell commands, execute Python, search the web, \
-read/write files, create and edit documents, generate images, manage memories, and more. \
+read/write files in allowed roots, create and edit documents, generate images, manage memories, and more. \
 To use a tool, write a fenced code block with the tool name as the language tag. \
 The block executes automatically and you see the output."""
 
@@ -72,6 +72,7 @@ _AGENT_RULES = """\
 - These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
 - For local file/folder access, prefer dedicated tools: `ls` to list directories, `read_file` to read files, `grep` to search contents, and `glob` to find files. Do NOT use Bash or PowerShell for these ordinary file tasks when the dedicated tools are available.
 - If `ls`, `read_file`, `grep`, or `glob` are available, do not claim you lack filesystem access. Call the appropriate tool and report the actual tool result or error.
+- For local file/folder write or edit requests, use `write_file` to create or fully rewrite files and `edit_file` to change existing files. Admin-selected Local File Access folders are valid write targets when the tool accepts the path. Do NOT claim you can only write in the current working directory unless `write_file`/`edit_file` actually rejects the path.
 - `powershell` is NOT an executable tool tag. If you need a shell command, the only shell tag is `bash`; for Windows paths, prefer `ls`/`read_file`/`grep`/`glob`.
 - Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
@@ -119,6 +120,7 @@ _API_AGENT_RULES = """\
 - Only call tools when they materially help answer the request.
 - You MUST use tools to take action — do not describe what you would do. Act, don't narrate.
 - For local file/folder access, call `ls`, `read_file`, `grep`, or `glob` before considering `bash`. Do not claim you lack filesystem access when those tools are available; attempt the appropriate tool and report its result.
+- For local file/folder write or edit requests, call `write_file` or `edit_file`. Admin-selected Local File Access folders are valid write targets when the tool accepts the path; do not fall back to shell redirects or claim you can only write in the current working directory unless the file tool rejects the path.
 - For web lookup/search/latest/current requests, call `web_search` or `web_fetch`. Do NOT use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
 - Keep answers concise unless the user asks for depth.
 - For long code or content, use document tools instead of pasting large blocks into chat.
@@ -272,13 +274,13 @@ Find files by glob pattern under an allowed folder, newest first. Prefer this ov
 <file path>
 <file contents>
 ```
-Write content to a file. First line is the path, rest is the content.""",
+Write content to a file. First line is the path, rest is the content. Use this for files under the app data/temp roots or admin-selected Local File Access folders. If the path is rejected, report the tool error; do not use bash/Python redirects as a workaround.""",
 
     "edit_file": """\
 ```edit_file
 {"path": "<file path>", "old_string": "<exact text to replace>", "new_string": "<replacement>", "replace_all": false}
 ```
-Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/echo/redirects) for changing files — it shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true. Use write_file to create a new file.""",
+Edit an EXISTING file by exact string replacement under an allowed root, including admin-selected Local File Access folders. PREFER this over bash (sed/echo/redirects) for changing files — it shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true. Use write_file to create a new file.""",
 
     "create_document": """\
 ```create_document

@@ -199,6 +199,40 @@ def test_extra_root_still_blocks_sensitive(tmp_path):
 # ── Integration: dispatch-level tests ────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_write_file_dispatch_allows_extra_root(monkeypatch, tmp_path):
+    """End-to-end: write_file can create files under configured extra roots."""
+    auth_mod = sys.modules.get("core.auth")
+    if auth_mod is None:
+        import core.auth as _real_auth
+        auth_mod = _real_auth
+
+    class _AdminAuth:
+        is_configured = True
+        def is_admin(self, username):
+            return True
+
+    monkeypatch.setattr(auth_mod, "AuthManager", lambda: _AdminAuth())
+    monkeypatch.setattr(
+        "src.tool_execution.owner_is_admin_or_single_user",
+        lambda owner: True,
+    )
+
+    extra_dir = tmp_path / "extra_root"
+    extra_dir.mkdir()
+    target = extra_dir / "scaffold.md"
+
+    from src.tool_execution import execute_tool_block
+    with patch("src.settings.get_setting", return_value=[str(extra_dir)]):
+        desc, result = await execute_tool_block(
+            _make_block("write_file", f"{target}\n# Design System\n"),
+            owner="admin-user",
+        )
+
+    assert result.get("exit_code") == 0
+    assert target.read_text() == "# Design System\n"
+
+
+@pytest.mark.asyncio
 async def test_read_file_dispatch_blocks_etc_shadow(monkeypatch):
     """End-to-end: read_file dispatch must reject /etc/shadow."""
     auth_mod = sys.modules.get("core.auth")
