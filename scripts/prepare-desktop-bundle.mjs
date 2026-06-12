@@ -85,12 +85,31 @@ function trackedFiles() {
   return output.split("\0").filter(Boolean).map(normalizeGitPath);
 }
 
+function untrackedRuntimeFiles() {
+  const output = execFileSync("git", ["ls-files", "-z", "--others", "--exclude-standard"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  return output.split("\0").filter(Boolean).map(normalizeGitPath).filter(isRuntimeFile);
+}
+
 function copyFileIntoBundle(file) {
   const source = path.join(REPO_ROOT, file);
   const target = path.join(OUT_DIR, file);
   if (!statSync(source).isFile()) return;
   mkdirSync(path.dirname(target), { recursive: true });
   cpSync(source, target, { force: true });
+}
+
+// The bundle is built from `git ls-files`, so an untracked runtime file would
+// be silently absent from the installer while edits to tracked files around it
+// are picked up — the installed app then half-runs the new feature.
+const untracked = untrackedRuntimeFiles();
+if (untracked.length) {
+  console.error("Refusing to bundle: untracked runtime files would be skipped by the installer:");
+  for (const file of untracked) console.error(`  ${file}`);
+  console.error("git add (or delete) these files, then rebuild.");
+  process.exit(1);
 }
 
 rmSync(OUT_DIR, { recursive: true, force: true });
