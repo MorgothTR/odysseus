@@ -477,8 +477,11 @@ class ToolIndex:
             {"list_cached_models", "search_hf_models"},
         # Local code review swarm. Keep this distinct from generic "review"
         # so ordinary proofreading/document review does not trigger it.
+        # Underscored spellings are listed explicitly: "_" is a word character,
+        # so \bswarm\b never fires inside "run_code_review_swarm".
         frozenset({"swarm", "agent swarm", "multi-agent review", "multi agent review",
                    "parallel review", "parallel audit", "code review swarm",
+                   "code_review_swarm", "review_swarm", "review swarm",
                    "review code quality", "code quality review", "audit code",
                    "audit the repo", "audit repository", "review repository",
                    "review this repo", "review this codebase"}):
@@ -518,6 +521,14 @@ class ToolIndex:
         for keywords, tools in self._KEYWORD_HINTS.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", ql) for kw in keywords):
                 base.update(tools)
+        # A built-in tool named verbatim ("run run_code_review_swarm on X") is
+        # the strongest possible signal — include it even when retrieval and
+        # the keyword hints miss it. Restricted to underscored names: those are
+        # unambiguous identifiers, while bare words like "pipeline" or "bash"
+        # appear in ordinary prose.
+        for name in BUILTIN_TOOL_DESCRIPTIONS:
+            if "_" in name and re.search(rf"\b{re.escape(name)}\b", ql):
+                base.add(name)
         # Structural scheduling-intent detection — typo-resilient (the literal
         # keyword "every day" misses "every dya"). Catches "every <word>",
         # daily/nightly/etc., or a clock time like "at 7:30 am" / "7am", which
