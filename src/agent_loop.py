@@ -2476,16 +2476,28 @@ async def stream_agent_loop(
                         await _progress_q.put(None)
 
                 _tool_task = asyncio.create_task(_run_tool())
-                # Drain progress events as they arrive — block until the
-                # next event OR the tool finishes (sentinel = None).
-                while True:
-                    evt = await _progress_q.get()
-                    if evt is None:
-                        break
-                    yield (
-                        f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
-                    )
-                desc, result = await _tool_task
+                try:
+                    # Drain progress events as they arrive — block until the
+                    # next event OR the tool finishes (sentinel = None).
+                    while True:
+                        evt = await _progress_q.get()
+                        if evt is None:
+                            break
+                        yield (
+                            f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
+                        )
+                    desc, result = await _tool_task
+                except (asyncio.CancelledError, GeneratorExit):
+                    # Stop button / stream teardown. The tool runs in its OWN
+                    # task so this generator's cancellation never reaches the
+                    # tool's subprocess await — cancel it explicitly or the
+                    # command (and its whole process tree) keeps running until
+                    # the tool timeout, long after the turn is gone. Deliberate
+                    # fire-and-forget: awaiting here is illegal during
+                    # GeneratorExit; the cancel still propagates to the task's
+                    # subprocess kill handler on the live event loop.
+                    _tool_task.cancel()
+                    raise
 
             # Extract structured web sources from web_search tool output.
             # web_search returns {"output": ..., "exit_code": 0}; check "output"
