@@ -198,6 +198,32 @@ def test_instant_crash_is_reported_at_start(jobs_dir, tmp_path):
     assert "exited immediately" in result["error"]
 
 
+def test_service_survives_relative_jobs_dir_with_project_cwd(tmp_path, monkeypatch):
+    # Regression: in production DATA_DIR defaults to the RELATIVE "data", but
+    # the wrapper script runs with the SERVICE's cwd (the user's project
+    # folder). Before job files were anchored absolutely, the wrapper's
+    # `> data/bg_jobs/x.log` redirect resolved inside the project folder,
+    # failed, and every service "died" instantly with no log or exit code.
+    backend_root = tmp_path / "backend-root"
+    project = tmp_path / "user-project"
+    backend_root.mkdir()
+    project.mkdir()
+    monkeypatch.chdir(backend_root)
+    monkeypatch.setattr(bg_jobs, "_JOBS_DIR", Path("data") / "bg_jobs")
+    monkeypatch.setattr(bg_jobs, "_STORE", backend_root / "bg_jobs.json")
+
+    marker = "relative-dir-svc"
+    rec = bg_jobs.launch(
+        _python_service_command(marker),
+        session_id="s1", cwd=str(project), service=True,
+    )
+    try:
+        assert _wait_for(lambda: marker in (bg_jobs.tail(rec["id"], lines=20) or ""))
+        assert (bg_jobs.get(rec["id"]) or {}).get("status") == "running"
+    finally:
+        bg_jobs.stop(rec["id"])
+
+
 def test_service_exempt_from_runaway_reap(jobs_dir, tmp_path):
     # A service older than its max_runtime_s must stay running; a plain job
     # with the same age is reaped as a runaway.

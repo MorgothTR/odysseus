@@ -91,10 +91,17 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
     is managed via stop()/tail() instead of awaiting completion. An exit is
     still detected and followed up, so the agent hears about crashes.
     """
-    _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    # Anchor every job file to an ABSOLUTE directory. The wrapper script runs
+    # with the JOB's cwd (for a service that is the user's project folder), so
+    # with the relative DATA_DIR default ("data") its `> data/bg_jobs/x.log`
+    # redirect would resolve inside the project folder, where the directory
+    # does not exist — the redirect fails and the wrapper dies before running
+    # anything (no log, no exit code, job reported as instantly "died").
+    jobs_dir = Path(_JOBS_DIR).resolve()
+    jobs_dir.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:12]
-    log_path = _JOBS_DIR / f"{job_id}.log"
-    exit_path = _JOBS_DIR / f"{job_id}.exit"
+    log_path = jobs_dir / f"{job_id}.log"
+    exit_path = jobs_dir / f"{job_id}.exit"
 
     # The user command goes in its OWN script file, run as a child `bash`. This
     # is what isolates it: an `exit` inside it only ends that child (so the
@@ -111,10 +118,10 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         # break the wrapper. `$?` is the child's real exit status. Paths are
         # emitted as POSIX (forward-slash) + shell-quoted so Git Bash on Windows
         # handles drive paths and spaces correctly.
-        cmd_path = _JOBS_DIR / f"{job_id}.cmd.sh"
+        cmd_path = jobs_dir / f"{job_id}.cmd.sh"
         cmd_path.write_text(command + "\n", encoding="utf-8")
         lp, xp, cp = (shlex.quote(git_bash_path(p)) for p in (log_path, exit_path, cmd_path))
-        script_path = _JOBS_DIR / f"{job_id}.sh"
+        script_path = jobs_dir / f"{job_id}.sh"
         script_path.write_text(
             f"bash {cp} > {lp} 2>&1\n"
             f"echo $? > {xp}\n",
@@ -124,9 +131,9 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
     else:
         # Windows without any bash installed: cmd.exe wrapper. The command runs
         # in its own child .cmd so %ERRORLEVEL% is the command's real exit code.
-        child_path = _JOBS_DIR / f"{job_id}.child.cmd"
+        child_path = jobs_dir / f"{job_id}.child.cmd"
         child_path.write_text("@echo off\r\n" + command + "\r\n", encoding="utf-8")
-        script_path = _JOBS_DIR / f"{job_id}.cmd"
+        script_path = jobs_dir / f"{job_id}.cmd"
         script_path.write_text(
             "@echo off\r\n"
             f'call "{child_path}" > "{log_path}" 2>&1\r\n'
@@ -187,7 +194,7 @@ def _prune(jobs: Dict[str, Dict[str, Any]], now: float) -> bool:
              and (now - rec["ended_at"]) > _RETENTION_S]
     for jid in stale:
         jobs.pop(jid, None)
-        for p in _JOBS_DIR.glob(f"{jid}.*"):   # .sh .cmd.sh .log .exit
+        for p in Path(_JOBS_DIR).resolve().glob(f"{jid}.*"):   # .sh .cmd.sh .log .exit
             try:
                 p.unlink()
             except Exception:
