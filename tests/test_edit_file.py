@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
@@ -65,6 +66,24 @@ async def test_edit_file_success():
     assert open(p).read() == "def f():\n    return 2\n"
     assert res["diff"]["added"] == 1 and res["diff"]["removed"] == 1 and res["diff"]["file"] == "ef_ok.py"
     os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_edit_file_allows_extra_root(tmp_path):
+    extra_dir = tmp_path / "extra_root"
+    extra_dir.mkdir()
+    target = extra_dir / "note.txt"
+    target.write_text("alpha beta", encoding="utf-8")
+
+    with patch("src.settings.get_setting", return_value=[str(extra_dir)]):
+        res = await _do_edit_file(json.dumps({
+            "path": str(target),
+            "old_string": "beta",
+            "new_string": "gamma",
+        }))
+
+    assert res["exit_code"] == 0
+    assert target.read_text(encoding="utf-8") == "alpha gamma"
 
 
 @pytest.mark.asyncio

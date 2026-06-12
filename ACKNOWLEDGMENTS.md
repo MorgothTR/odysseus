@@ -104,7 +104,7 @@ Core (`requirements.txt`) and optional (`requirements-optional.txt`):
 | BeautifulSoup4 | MIT |
 | charset-normalizer | MIT |
 | NumPy | BSD-3-Clause |
-| ChromaDB (chromadb-client) | Apache-2.0 |
+| ChromaDB (chromadb) | Apache-2.0 |
 | fastembed | Apache-2.0 |
 | youtube-transcript-api | MIT |
 | markdown | BSD-3-Clause |

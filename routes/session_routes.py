@@ -11,7 +11,7 @@ from core.session_manager import SessionManager
 from core.models import ChatMessage
 from src.request_models import SessionResponse
 from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
-from src.auth_helpers import get_current_user, effective_user
+from src.auth_helpers import get_current_user, effective_user, _auth_disabled
 
 
 def _sanitize_export_filename(name: str) -> str:
@@ -106,8 +106,8 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
     that only care about persisted sessions keep their exact prior behavior.
     """
     user = effective_user(request)
-    if not user:
-        raise HTTPException(403, "Authentication required")
+    if not user and not _auth_disabled():
+        raise HTTPException(401, "Authentication required")
     db = SessionLocal()
     try:
         row = db.query(DbSession.owner).filter(DbSession.id == session_id).first()
@@ -543,22 +543,25 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             ids = body.get("ids", [])
         except Exception:
             ids = []
+        deleted_count = 0
         for sid in ids:
             try:
                 _verify_session_owner(request, sid, session_manager)
-                session_manager.delete_session(sid)
+                
+                # Enforce "starred" protection consistent with single-session delete
                 db = SessionLocal()
                 try:
-                    db.query(_CM).filter(_CM.session_id == sid).delete()
-                    db.query(DbSession).filter(DbSession.id == sid).delete()
-                    db.commit()
-                except Exception:
-                    db.rollback()
+                    db_sess = db.query(DbSession).filter(DbSession.id == sid).first()
+                    if db_sess and db_sess.is_important:
+                        continue
                 finally:
                     db.close()
+
+                if session_manager.delete_session(sid):
+                    deleted_count += 1
             except Exception:
                 pass
-        return {"deleted": len(ids)}
+        return {"deleted": deleted_count}
 
     @router.delete("/session/{sid}")
     def delete_session(request: Request, sid: str):
@@ -924,7 +927,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         from src.endpoint_resolver import resolve_endpoint
         from src.llm_core import llm_call_async
 
-        url, model, headers = resolve_endpoint("utility", owner=get_current_user(request))
+        owner = getattr(session, "owner", None) or effective_user(request)
+        url, model, headers = resolve_endpoint("utility", owner=owner)
         if not url or not model:
             url, model, headers = session.endpoint_url, session.model, session.headers
         if not url or not model:

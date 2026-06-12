@@ -33,6 +33,7 @@ from core.atomic_io import atomic_write_json
 from core.platform_compat import (
     detached_popen_kwargs,
     find_bash,
+    git_bash_path,
     kill_process_tree,
     pid_alive,
 )
@@ -77,17 +78,30 @@ def _pid_alive(pid: Optional[int]) -> bool:
 
 
 def launch(command: str, session_id: str, cwd: Optional[str] = None,
-           max_runtime_s: int = DEFAULT_MAX_RUNTIME_S) -> Dict[str, Any]:
+           max_runtime_s: int = DEFAULT_MAX_RUNTIME_S,
+           service: bool = False, name: Optional[str] = None) -> Dict[str, Any]:
     """Launch `command` detached. Returns the job record (status='running').
 
     Output + the final exit code are written to files so status survives a
     server restart. The process is put in its own session (setsid) so it
     outlives the request/stream that started it.
+
+    `service=True` marks a process that is SUPPOSED to keep running (dev
+    server, watcher, emulator): it is exempt from the max-runtime reap and
+    is managed via stop()/tail() instead of awaiting completion. An exit is
+    still detected and followed up, so the agent hears about crashes.
     """
-    _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    # Anchor every job file to an ABSOLUTE directory. The wrapper script runs
+    # with the JOB's cwd (for a service that is the user's project folder), so
+    # with the relative DATA_DIR default ("data") its `> data/bg_jobs/x.log`
+    # redirect would resolve inside the project folder, where the directory
+    # does not exist — the redirect fails and the wrapper dies before running
+    # anything (no log, no exit code, job reported as instantly "died").
+    jobs_dir = Path(_JOBS_DIR).resolve()
+    jobs_dir.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:12]
-    log_path = _JOBS_DIR / f"{job_id}.log"
-    exit_path = _JOBS_DIR / f"{job_id}.exit"
+    log_path = jobs_dir / f"{job_id}.log"
+    exit_path = jobs_dir / f"{job_id}.exit"
 
     # The user command goes in its OWN script file, run as a child `bash`. This
     # is what isolates it: an `exit` inside it only ends that child (so the
@@ -104,10 +118,10 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         # break the wrapper. `$?` is the child's real exit status. Paths are
         # emitted as POSIX (forward-slash) + shell-quoted so Git Bash on Windows
         # handles drive paths and spaces correctly.
-        cmd_path = _JOBS_DIR / f"{job_id}.cmd.sh"
+        cmd_path = jobs_dir / f"{job_id}.cmd.sh"
         cmd_path.write_text(command + "\n", encoding="utf-8")
-        lp, xp, cp = (shlex.quote(p.as_posix()) for p in (log_path, exit_path, cmd_path))
-        script_path = _JOBS_DIR / f"{job_id}.sh"
+        lp, xp, cp = (shlex.quote(git_bash_path(p)) for p in (log_path, exit_path, cmd_path))
+        script_path = jobs_dir / f"{job_id}.sh"
         script_path.write_text(
             f"bash {cp} > {lp} 2>&1\n"
             f"echo $? > {xp}\n",
@@ -117,9 +131,9 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
     else:
         # Windows without any bash installed: cmd.exe wrapper. The command runs
         # in its own child .cmd so %ERRORLEVEL% is the command's real exit code.
-        child_path = _JOBS_DIR / f"{job_id}.child.cmd"
+        child_path = jobs_dir / f"{job_id}.child.cmd"
         child_path.write_text("@echo off\r\n" + command + "\r\n", encoding="utf-8")
-        script_path = _JOBS_DIR / f"{job_id}.cmd"
+        script_path = jobs_dir / f"{job_id}.cmd"
         script_path.write_text(
             "@echo off\r\n"
             f'call "{child_path}" > "{log_path}" 2>&1\r\n'
@@ -134,6 +148,12 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
         cwd=cwd or None,
+        # PYTHONUNBUFFERED so python jobs log LIVE. With the default block
+        # buffering nothing reaches the log file until ~8KB accumulate, so a
+        # healthy quiet server tails as "(no output yet)" — and an agent reads
+        # that as "broken" and restarts it (observed: a model stacked five
+        # http.servers on one port that way).
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
         **detached_popen_kwargs(),  # detach from the request lifecycle (setsid / DETACHED_PROCESS)
     )
 
@@ -141,12 +161,15 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         "id": job_id,
         "session_id": session_id,
         "command": command,
-        "status": "running",       # running | done | failed
+        "cwd": cwd or "",
+        "status": "running",       # running | done | failed | stopped
         "pid": proc.pid,
         "started_at": time.time(),
         "ended_at": None,
         "exit_code": None,
         "max_runtime_s": max_runtime_s,
+        "service": bool(service),
+        "name": (name or "").strip()[:48],
         "followed_up": False,       # has the agent been re-invoked with the result?
         "log_path": str(log_path),
         "exit_path": str(exit_path),
@@ -178,7 +201,7 @@ def _prune(jobs: Dict[str, Dict[str, Any]], now: float) -> bool:
              and (now - rec["ended_at"]) > _RETENTION_S]
     for jid in stale:
         jobs.pop(jid, None)
-        for p in _JOBS_DIR.glob(f"{jid}.*"):   # .sh .cmd.sh .log .exit
+        for p in Path(_JOBS_DIR).resolve().glob(f"{jid}.*"):   # .sh .cmd.sh .log .exit
             try:
                 p.unlink()
             except Exception:
@@ -205,8 +228,11 @@ def refresh() -> Dict[str, Dict[str, Any]]:
             rec["status"] = "done" if code == 0 else "failed"
             rec["ended_at"] = now
             changed = True
-        elif (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S):
+        elif (not rec.get("service")
+              and (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S)):
             # Runaway / stuck — reap it but STILL surface a follow-up.
+            # Services are exempt: a dev server running for hours is the
+            # point, not a runaway. They end via stop() or their own exit.
             _kill(rec.get("pid"))
             rec["status"] = "failed"
             rec["exit_code"] = -1
@@ -257,6 +283,37 @@ def get(job_id: str) -> Optional[Dict[str, Any]]:
     return rec
 
 
+def stop(job_id: str) -> Optional[Dict[str, Any]]:
+    """Deliberately stop a job/service. Kills the whole process tree and
+    marks the record followed_up — the agent initiated the stop, so the
+    monitor must not re-invoke it about the 'crash' it just caused."""
+    refresh()
+    jobs = _load()
+    rec = jobs.get(job_id)
+    if not rec:
+        return None
+    if rec.get("status") == "running":
+        _kill(rec.get("pid"))
+        rec["status"] = "stopped"
+        rec["ended_at"] = time.time()
+    rec["followed_up"] = True
+    _save(jobs)
+    out = dict(rec)
+    out["output"] = _read_output(rec)
+    return out
+
+
+def tail(job_id: str, lines: int = 60) -> Optional[str]:
+    """Most recent `lines` lines of a job's captured output (works mid-run —
+    the log file is written continuously). None if the job id is unknown."""
+    rec = _load().get(job_id)
+    if not rec:
+        return None
+    lines = max(5, min(int(lines or 60), 400))
+    text = _read_output(rec)
+    return "\n".join(text.splitlines()[-lines:])
+
+
 def list_for_session(session_id: str) -> List[Dict[str, Any]]:
     return [r for r in refresh().values() if r.get("session_id") == session_id]
 
@@ -264,10 +321,13 @@ def list_for_session(session_id: str) -> List[Dict[str, Any]]:
 def result_text(rec: Dict[str, Any]) -> str:
     """Human/agent-readable summary of a finished job, for the follow-up."""
     out = _read_output(rec)
+    label = "Background service" if rec.get("service") else "Background job"
+    if rec.get("name"):
+        label += f" '{rec['name']}'"
     if rec.get("timed_out"):
-        head = f"Background job timed out after {rec.get('max_runtime_s')}s."
+        head = f"{label} timed out after {rec.get('max_runtime_s')}s."
     elif rec.get("died"):
-        head = "Background job process died unexpectedly (no exit code)."
+        head = f"{label} process died unexpectedly (no exit code)."
     else:
-        head = f"Background job finished with exit code {rec.get('exit_code')}."
+        head = f"{label} finished with exit code {rec.get('exit_code')}."
     return f"{head}\nCommand: {rec.get('command')}\n\nOutput:\n{out or '(no output)'}"

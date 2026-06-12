@@ -13,11 +13,14 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
+from src.tool_policy import ToolPolicy
+from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS, MAX_DIFF_LINES
 
 # Persistent working directory for agent subprocesses.
 # Resolves to <repo_root>/data, which is the bind-mounted volume in Docker
@@ -25,10 +28,6 @@ from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_u
 # Using this as cwd and HOME prevents the agent from silently creating files
 # in ephemeral container layers that are lost on the next rebuild.
 _AGENT_WORKDIR = str(pathlib.Path(__file__).parent.parent / "data")
-
-MAX_OUTPUT_CHARS = 10_000
-MAX_READ_CHARS = 20_000
-MAX_DIFF_LINES = 400  # cap unified-diff size returned to the UI
 
 
 def _unified_diff(old: str, new: str, path: str) -> Optional[Dict[str, Any]]:
@@ -49,8 +48,8 @@ def _unified_diff(old: str, new: str, path: str) -> Optional[Dict[str, Any]]:
         fromfile=f"a/{label}", tofile=f"b/{label}",
         lineterm="",
     ))
-    added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+    added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
     truncated = False
     if len(diff_lines) > MAX_DIFF_LINES:
         diff_lines = diff_lines[:MAX_DIFF_LINES]
@@ -170,7 +169,7 @@ def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
     matches a sensitive filename — regardless of what root it sits under.
     """
-    parts = resolved.split(os.sep)
+    parts = [part.lower() for part in re.split(r"[\\/]+", resolved) if part]
     filenames: set[str] = {parts[-1]} if parts else set()
 
     # Check if any path component is a sensitive directory.
@@ -206,17 +205,18 @@ def _tool_path_roots() -> list[str]:
     except OSError:
         pass
 
-    # $TMPDIR — per-user temp root on macOS (e.g. /var/folders/.../T/).
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir:
-        roots.append(tmpdir)
+    # Per-user temp roots (TMPDIR on Unix/macOS, TEMP/TMP on Windows).
+    for key in ("TMPDIR", "TEMP", "TMP"):
+        tmpdir = os.environ.get(key)
+        if tmpdir:
+            roots.append(tmpdir)
 
     # Opt-in extra roots from settings.
     try:
         from src.settings import get_setting
+        from src.tool_path_roots import safe_tool_path_roots
         extra = get_setting("tool_path_extra_roots")
-        if isinstance(extra, list):
-            roots.extend(str(r) for r in extra if r)
+        roots.extend(safe_tool_path_roots(extra))
     except Exception:
         pass
 
@@ -374,6 +374,30 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 logger = logging.getLogger(__name__)
 
 
+def _kill_proc_tree(proc: "asyncio.subprocess.Process") -> None:
+    """Kill the subprocess AND all of its descendants.
+
+    `proc.kill()` alone kills just the shell; children it spawned (e.g. a
+    `python -m http.server` the model started) survived as orphans with dead
+    pipes — and since SO_REUSEADDR lets several processes share a port on
+    Windows, the corpses then swallowed connections meant for healthy servers.
+
+    POSIX note: kill_process_tree signals the child's process GROUP, which is
+    only safe because the bash/python subprocesses are spawned with
+    start_new_session=True (session leader => own group, not the backend's).
+    """
+    from core.platform_compat import kill_process_tree
+
+    try:
+        kill_process_tree(proc.pid)
+    except Exception:
+        pass
+    try:
+        proc.kill()  # backstop if the tree kill raced the pid
+    except Exception:
+        pass
+
+
 async def _run_subprocess_streaming(
     proc: asyncio.subprocess.Process,
     *,
@@ -437,22 +461,16 @@ async def _run_subprocess_streaming(
         await asyncio.wait_for(proc.wait(), timeout=timeout)
     except asyncio.TimeoutError:
         timed_out = True
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        _kill_proc_tree(proc)
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
             pass
     except asyncio.CancelledError:
-        # User hit stop / SSE stream torn down. Kill the child so it
-        # doesn't keep running orphaned. Re-raise so the agent loop's
-        # cancellation propagates as the user expects.
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        # User hit stop / SSE stream torn down. Kill the child AND its
+        # descendants so nothing keeps running orphaned. Re-raise so the
+        # agent loop's cancellation propagates as the user expects.
+        _kill_proc_tree(proc)
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
@@ -554,7 +572,7 @@ def _parse_write_file(content: str) -> Dict:
     return {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
 
 
-_MCP_ARG_PARSERS: Dict[str, callable] = {
+_MCP_ARG_PARSERS: Dict[str, Callable[[str], Dict[str, str]]] = {
     "bash":           lambda c: {"command": c},
     "python":         lambda c: {"code": c},
     "web_search":     lambda c: {"query": c.split("\n")[0].strip()},
@@ -594,7 +612,38 @@ async def _call_mcp_tool(
         if fallback:
             return fallback
 
+    # generate_image runs as a text-only MCP tool, so the saved image URL never
+    # reaches the agent loop's structured forwarding (which renders the image via
+    # buildImageBubble on result["image_url"]). Lift it out of the tool's stdout so
+    # the image renders deterministically — no dependence on the model echoing the
+    # URL into its prose (which it mangles/hallucinates).
+    if tool == "generate_image":
+        _promote_image_fields(result)
+
     return result
+
+
+def _promote_image_fields(result: Dict) -> None:
+    """Lift the image URL (+ prompt/model/size) from a successful generate_image MCP
+    text result into structured fields the agent loop already forwards to
+    buildImageBubble. Only acts on a dict result with exit_code 0; matches the
+    generated-image URL by pattern (absolute or relative) so it's robust to the
+    result's wording."""
+    if not isinstance(result, dict) or result.get("exit_code") != 0:
+        return
+    out = result.get("stdout") or ""
+    m = re.search(r'(?:https?://[^\s)\]]+)?/api/generated-image/[A-Za-z0-9._-]+', out)
+    if not m:
+        return
+    result["image_url"] = m.group(0).strip()
+    for field, pat in (
+        ("image_prompt", r'^Generated image for:\s*(.+)$'),
+        ("image_model", r'^model:\s*(.+)$'),
+        ("image_size", r'^size:\s*(.+)$'),
+    ):
+        fm = re.search(pat, out, re.M)
+        if fm:
+            result[field] = fm.group(1).strip()
 
 
 _BG_MARKERS = {"#!bg", "#bg", "# bg", "#background", "# background", "@background", "# @background"}
@@ -628,8 +677,6 @@ async def _direct_fallback(
     are still running, with `{elapsed_s, tail}` payloads. Other tools
     ignore it.
     """
-    import json as _json
-
     # Inherit env + force a sane terminal so subprocesses that touch
     # terminfo (anything calling `clear`, `tput`, `os.system("clear")`,
     # or scripts that probe $TERM) don't spam "TERM environment variable
@@ -654,6 +701,10 @@ async def _direct_fallback(
                 stderr=asyncio.subprocess.PIPE,
                 env=_subproc_env,
                 cwd=workspace or _AGENT_WORKDIR,
+                # Own session/group so the timeout/cancel tree kill targets
+                # this command's descendants, never the backend. No-op on
+                # Windows (taskkill /T walks the tree by parentage there).
+                start_new_session=True,
             )
             stdout, stderr, rc, timed_out = await _run_subprocess_streaming(
                 proc,
@@ -681,6 +732,8 @@ async def _direct_fallback(
                 stderr=asyncio.subprocess.PIPE,
                 env=_subproc_env,
                 cwd=workspace or _AGENT_WORKDIR,
+                # Same tree-kill containment as the bash tool above.
+                start_new_session=True,
             )
             stdout, stderr, rc, timed_out = await _run_subprocess_streaming(
                 proc,
@@ -703,11 +756,11 @@ async def _direct_fallback(
             _stripped = content.strip()
             if _stripped.startswith("{"):
                 try:
-                    _a = _json.loads(_stripped)
+                    _a = json.loads(_stripped)
                     raw_path = str(_a.get("path", "")).strip()
                     offset = int(_a.get("offset") or 0)
                     limit = int(_a.get("limit") or 0)
-                except (_json.JSONDecodeError, TypeError, ValueError):
+                except (json.JSONDecodeError, TypeError, ValueError):
                     pass
             try:
                 path = (_resolve_tool_path_in_workspace(workspace, raw_path)
@@ -792,8 +845,8 @@ async def _direct_fallback(
             _s = (content or "").strip()
             if _s.startswith("{"):
                 try:
-                    args = _json.loads(_s)
-                except _json.JSONDecodeError:
+                    args = json.loads(_s)
+                except json.JSONDecodeError:
                     args = {}
             else:
                 args = {"pattern": _s}
@@ -883,8 +936,8 @@ async def _direct_fallback(
             _s = (content or "").strip()
             if _s.startswith("{"):
                 try:
-                    args = _json.loads(_s)
-                except _json.JSONDecodeError:
+                    args = json.loads(_s)
+                except json.JSONDecodeError:
                     args = {}
             else:
                 args = {"pattern": _s}
@@ -933,8 +986,8 @@ async def _direct_fallback(
             _s = (content or "").strip()
             if _s.startswith("{"):
                 try:
-                    raw_path = str(_json.loads(_s).get("path", "")).strip()
-                except _json.JSONDecodeError:
+                    raw_path = str(json.loads(_s).get("path", "")).strip()
+                except json.JSONDecodeError:
                     raw_path = ""
             else:
                 raw_path = _s.split("\n", 1)[0].strip()
@@ -984,7 +1037,7 @@ async def _direct_fallback(
             # Allow JSON-shaped args: {"query": "...", "time_filter": "day", "max_pages": 7}
             if raw.startswith("{"):
                 try:
-                    parsed = _json.loads(raw)
+                    parsed = json.loads(raw)
                     if isinstance(parsed, dict) and "query" in parsed:
                         query = str(parsed.get("query", "")).strip()
                         tf = parsed.get("time_filter") or parsed.get("freshness")
@@ -993,7 +1046,7 @@ async def _direct_fallback(
                         mp = parsed.get("max_pages")
                         if isinstance(mp, int) and 1 <= mp <= 10:
                             max_pages = mp
-                except _json.JSONDecodeError:
+                except json.JSONDecodeError:
                     pass
             if not query:
                 query = raw.split("\n")[0].strip()
@@ -1023,7 +1076,7 @@ async def _direct_fallback(
             )
             output = text[:MAX_OUTPUT_CHARS] if len(text) > MAX_OUTPUT_CHARS else text
             if sources:
-                output += "\n\n<!-- SOURCES:" + _json.dumps(sources) + " -->"
+                output += "\n\n<!-- SOURCES:" + json.dumps(sources) + " -->"
             return {"output": output, "exit_code": 0}
 
         if tool == "web_fetch":
@@ -1036,10 +1089,10 @@ async def _direct_fallback(
             # Accept either a JSON arg ({"url": "..."}) or a plain URL/domain.
             if raw.startswith("{"):
                 try:
-                    parsed = _json.loads(raw)
+                    parsed = json.loads(raw)
                     if isinstance(parsed, dict):
                         url = str(parsed.get("url") or "").strip()
-                except _json.JSONDecodeError:
+                except json.JSONDecodeError:
                     url = ""
             if not url:
                 # Non-JSON (or JSON without a usable url): take the first line
@@ -1101,6 +1154,7 @@ async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
     disabled_tools: Optional[set] = None,
+    tool_policy: Optional[ToolPolicy] = None,
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
@@ -1137,8 +1191,7 @@ async def execute_tool_block(
     # Return a helpful error so the model retries with the correct format.
     if tool in ("python", "json", "xml") and content.strip().startswith("{") and content.strip().endswith("}"):
         try:
-            import json as _json
-            parsed = _json.loads(content.strip())
+            parsed = json.loads(content.strip())
             if isinstance(parsed, dict):
                 desc = f"{tool}: misformatted tool call"
                 result = {
@@ -1160,6 +1213,12 @@ async def execute_tool_block(
             pass
 
     # Reject tools that the user has disabled for this request
+    if tool_policy and tool_policy.blocks(tool):
+        desc = f"{tool}: BLOCKED"
+        result = {"error": tool_policy.reason_for(tool), "exit_code": 1}
+        logger.info("Tool blocked by policy: %s", tool)
+        return desc, result
+
     if disabled_tools and tool in disabled_tools:
         desc = f"{tool}: BLOCKED"
         result = {"error": f"Tool '{tool}' is disabled by user.", "exit_code": 1}
@@ -1182,6 +1241,87 @@ async def execute_tool_block(
             "exit_code": 1,
         }
         logger.warning("Public tool policy blocked owner=%r tool=%s", owner, tool)
+        return desc, result
+
+    # ask_user: the agent poses a multiple-choice question to the user to get a
+    # decision/clarification. This is a pure UI-control marker — no subprocess,
+    # no filesystem. It returns an `ask_user` payload that the agent loop turns
+    # into an `ask_user` SSE event and then ENDS the turn, so the chat waits for
+    # the user's selection (their choice arrives as the next message).
+    if tool == "ask_user":
+        question, options, multi = "", [], False
+        raw = (content or "").strip()
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            parsed = {}
+        if isinstance(parsed, dict):
+            question = str(parsed.get("question", "")).strip()
+            multi = bool(parsed.get("multi") or parsed.get("multiSelect"))
+            for opt in (parsed.get("options") or []):
+                if isinstance(opt, dict):
+                    label = str(opt.get("label", "")).strip()
+                    descr = str(opt.get("description", "")).strip()
+                elif isinstance(opt, str):
+                    label, descr = opt.strip(), ""
+                else:
+                    continue
+                if label:
+                    options.append({"label": label, "description": descr})
+        else:
+            question = raw
+        if not question or len(options) < 2:
+            return "ask_user: invalid", {
+                "error": (
+                    "ask_user needs a non-empty `question` and at least 2 `options` "
+                    "(each an object with a `label`, optional `description`)."
+                ),
+                "exit_code": 1,
+            }
+        options = options[:6]  # keep the choice list sane
+        desc = f"ask_user: {question[:80]}"
+        labels = ", ".join(o["label"] for o in options)
+        result = {
+            "ask_user": {"question": question, "options": options, "multi": multi},
+            "output": f"Asked the user: {question}\nOptions: {labels}\nAwaiting their selection.",
+            "exit_code": 0,
+        }
+        logger.info("Tool executed: %s (%d options, multi=%s)", desc, len(options), multi)
+        return desc, result
+
+    # update_plan: the agent writes back to the active plan — tick an item done
+    # or revise steps (e.g. when the user asks to change something). Pure UI
+    # marker: returns a `plan_update` payload the agent loop turns into a
+    # `plan_update` SSE event; the frontend replaces the stored plan and refreshes
+    # the docked plan window. Does NOT end the turn.
+    if tool == "update_plan":
+        import json as _json
+        raw = (content or "").strip()
+        plan = ""
+        try:
+            parsed = _json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            parsed = {}
+        if isinstance(parsed, dict) and parsed.get("plan"):
+            plan = str(parsed.get("plan", "")).strip()
+        else:
+            # Plain-string call (raw checklist) or JSON without a usable `plan`.
+            plan = raw
+        if not plan:
+            return "update_plan: invalid", {
+                "error": "update_plan needs a non-empty `plan` (the full updated checklist as markdown).",
+                "exit_code": 1,
+            }
+        plan = plan[:8192]
+        done = plan.count("- [x]") + plan.count("- [X]")
+        total = done + plan.count("- [ ]")
+        desc = f"update_plan: {done}/{total} done" if total else "update_plan"
+        result = {
+            "plan_update": {"plan": plan},
+            "output": f"Plan updated ({done}/{total} steps complete)." if total else "Plan updated.",
+            "exit_code": 0,
+        }
+        logger.info("Tool executed: %s", desc)
         return desc, result
 
     # Background execution: a `bash` block whose first line is the `#!bg`
@@ -1222,6 +1362,28 @@ async def execute_tool_block(
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool == "run_code_review_swarm":
+        from src.code_review_swarm import run_code_review_swarm
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"run_code_review_swarm: {first_line}"
+        result = await run_code_review_swarm(
+            content,
+            owner=owner,
+            session_id=session_id,
+            workspace=workspace,
+            progress_cb=progress_cb,
+        )
+    elif tool == "manage_processes":
+        from src.process_manager import manage_processes
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"manage_processes: {first_line}"
+        result = await manage_processes(
+            content,
+            session_id=session_id,
+            workspace=workspace,
+        )
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

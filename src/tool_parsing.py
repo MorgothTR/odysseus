@@ -5,9 +5,11 @@ Regex-based parsing of tool invocations from LLM response text.
 Supports fenced code blocks, [TOOL_CALL] blocks, and XML-style <invoke> blocks.
 """
 
-import re
+import ast
 import json
 import logging
+import re
+import shlex
 from typing import List, Optional
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
@@ -53,6 +55,15 @@ _TOOL_CODE_RE = re.compile(
     r"<tool_code>\s*\{([\s\S]*?)\}\s*</tool_code>",
     re.IGNORECASE,
 )
+
+_BARE_FILE_TOOL_NAMES = frozenset({"ls", "read_file", "grep", "glob"})
+_BARE_FILE_TOOL_SHELL_RE = re.compile(
+    r"^(ls|read_file|grep|glob)\s+(.+?)\s*$",
+    re.IGNORECASE,
+)
+_WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_PATH_HAS_GLOB_RE = re.compile(r"[*?\[]")
+_SHELL_META_RE = re.compile(r"(?:[|;&]|\|\||&&|>>?|<|\b2>|`|\$\(|\${)")
 
 # Pattern 5: DeepSeek DSML markup leaking into content. When deepseek
 # models can't emit structured tool_calls (e.g. we sent no tool schemas
@@ -174,12 +185,344 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
+    "swarm": "run_code_review_swarm",
+    "code_review_swarm": "run_code_review_swarm",
+    "review_swarm": "run_code_review_swarm",
+    "run_code_review_swarm": "run_code_review_swarm",
+    "manage_processes": "manage_processes",
+    "manage_process": "manage_processes",
+    "processes": "manage_processes",
+    "process_manager": "manage_processes",
+    "background_service": "manage_processes",
+}
+
+_MISFENCED_WEB_TOOL_NAMES = {
+    "web_search": "web_search",
+    "websearch": "web_search",
+    "google_search": "web_search",
+    "google_search_retrieval": "web_search",
+    "google_search_grounding": "web_search",
+    "web_fetch": "web_fetch",
+    "webfetch": "web_fetch",
+    "fetch_url": "web_fetch",
 }
 
 
 # ---------------------------------------------------------------------------
 # Parsing functions
 # ---------------------------------------------------------------------------
+
+def _literal_string(value) -> Optional[str]:
+    """Return a string from a small literal AST node, or None."""
+    try:
+        parsed = ast.literal_eval(value)
+    except (ValueError, SyntaxError, TypeError):
+        return None
+    if isinstance(parsed, str):
+        return parsed.strip()
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+    return None
+
+
+def _parse_misfenced_web_lookup(content: str) -> Optional[ToolBlock]:
+    """Recover simple web_search/web_fetch calls wrapped in python/bash fences.
+
+    Some local fenced-tool models write:
+
+        ```python
+        web_search("latest python release")
+        ```
+
+    That is an intended tool call, not Python code. Keep this intentionally
+    narrow: only a single bare function call to a known web tool alias converts.
+    """
+    try:
+        module = ast.parse(content.strip(), mode="exec")
+    except SyntaxError:
+        return None
+    if len(module.body) != 1 or not isinstance(module.body[0], ast.Expr):
+        return None
+    call = module.body[0].value
+    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+        return None
+
+    mapped = _MISFENCED_WEB_TOOL_NAMES.get(call.func.id.lower())
+    if mapped not in ("web_search", "web_fetch"):
+        return None
+    if len(call.args) > 1:
+        return None
+
+    args = {}
+    if call.args:
+        key = "url" if mapped == "web_fetch" else "query"
+        value = _literal_string(call.args[0])
+        if not value:
+            return None
+        args[key] = value
+
+    allowed = {"query", "queries", "url", "time_filter", "freshness", "max_pages"}
+    for keyword in call.keywords:
+        if keyword.arg not in allowed:
+            return None
+        key = "query" if keyword.arg == "queries" else keyword.arg
+        value = _literal_string(keyword.value)
+        if value is not None:
+            args[key] = value
+            continue
+        try:
+            parsed = ast.literal_eval(keyword.value)
+        except (ValueError, SyntaxError, TypeError):
+            return None
+        if key == "max_pages" and isinstance(parsed, int):
+            args[key] = parsed
+            continue
+        return None
+
+    if mapped == "web_search":
+        query = args.get("query")
+        if not query:
+            return None
+        payload = {"query": query}
+        for key in ("time_filter", "freshness", "max_pages"):
+            if key in args:
+                payload[key] = args[key]
+        if len(payload) == 1:
+            return ToolBlock("web_search", query)
+        return ToolBlock("web_search", json.dumps(payload))
+
+    url = args.get("url")
+    if not url:
+        return None
+    return ToolBlock("web_fetch", url)
+
+
+def _literal_jsonable(node):
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError, TypeError):
+        return None
+
+
+def _looks_like_abs_or_relative_path(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip().strip('"\'')
+    return bool(
+        _WINDOWS_ABS_PATH_RE.match(text)
+        or text.startswith(("./", ".\\", "../", "..\\", "/", "\\"))
+    )
+
+
+def _split_shellish_file_tool_args(arg: str) -> Optional[List[str]]:
+    """Tokenize simple read-only file-tool text without accepting shell syntax."""
+
+    if not isinstance(arg, str) or not arg.strip():
+        return None
+    if "\n" in arg or _SHELL_META_RE.search(arg):
+        return None
+    try:
+        return shlex.split(arg, posix=False)
+    except ValueError:
+        return None
+
+
+def _strip_token_quotes(token: str) -> str:
+    text = (token or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1].strip()
+    return text
+
+
+def _split_glob_path(raw_path: str) -> tuple[str, str]:
+    """Return (base path, glob pattern) for a wildcard path."""
+
+    path = _strip_token_quotes(raw_path).replace("\\", "/")
+    wildcard_positions = [pos for ch in ("*", "?", "[") if (pos := path.find(ch)) >= 0]
+    if not wildcard_positions:
+        return path, "*"
+    first_wildcard = min(wildcard_positions)
+    slash = path.rfind("/", 0, first_wildcard)
+    if slash < 0:
+        return ".", path
+    base = path[:slash] or "/"
+    pattern = path[slash + 1 :] or "*"
+    return base, pattern
+
+
+def _parse_shellish_ls_or_glob(tool: str, arg: str) -> Optional[ToolBlock]:
+    tokens = _split_shellish_file_tool_args(arg)
+    if not tokens or len(tokens) != 1:
+        return None
+    raw_path = _strip_token_quotes(tokens[0])
+    if not raw_path:
+        return None
+    if _PATH_HAS_GLOB_RE.search(raw_path):
+        base, pattern = _split_glob_path(raw_path)
+        return ToolBlock("glob", json.dumps({"pattern": pattern, "path": base}))
+    return ToolBlock(tool, raw_path)
+
+
+def _parse_shellish_grep(arg: str) -> Optional[ToolBlock]:
+    tokens = _split_shellish_file_tool_args(arg)
+    if not tokens:
+        return None
+
+    pattern = None
+    path = ""
+    glob_pat = ""
+    ignore_case = False
+    i = 0
+    while i < len(tokens):
+        token = _strip_token_quotes(tokens[i])
+        if not token:
+            i += 1
+            continue
+        if token in ("-r", "-R", "--recursive", "-n", "--line-number", "--no-heading"):
+            i += 1
+            continue
+        if token in ("-i", "--ignore-case"):
+            ignore_case = True
+            i += 1
+            continue
+        if token in ("--glob", "-g"):
+            if i + 1 >= len(tokens):
+                return None
+            glob_pat = _strip_token_quotes(tokens[i + 1])
+            i += 2
+            continue
+        if token.startswith("-"):
+            return None
+        if pattern is None:
+            pattern = token
+        elif not path and _looks_like_abs_or_relative_path(token):
+            path = token
+        else:
+            return None
+        i += 1
+
+    if not pattern:
+        return None
+    payload = {"pattern": pattern}
+    if path:
+        if _PATH_HAS_GLOB_RE.search(path):
+            base, split_glob = _split_glob_path(path)
+            payload["path"] = base
+            payload["glob"] = glob_pat or split_glob
+        else:
+            payload["path"] = path
+    if glob_pat and "glob" not in payload:
+        payload["glob"] = glob_pat
+    if ignore_case:
+        payload["ignore_case"] = True
+    return ToolBlock("grep", json.dumps(payload))
+
+
+def _parse_bare_file_tool_call_line(line: str) -> Optional[ToolBlock]:
+    """Parse local-model bare file-tool calls such as ``ls("C:/x")``.
+
+    Some fenced-tool local models emit Python-ish or shell-ish text for simple
+    file tools even when instructed to use ```ls fences. Keep this parser
+    intentionally narrow: only dedicated file tools, only one line, no bash or
+    python aliases.
+    """
+
+    if not isinstance(line, str):
+        return None
+    text = line.strip()
+    if not text:
+        return None
+    if text.startswith("```") and text.endswith("```") and len(text) > 6:
+        text = text[3:-3].strip()
+    elif text.startswith("`") and text.endswith("`") and len(text) > 2:
+        text = text[1:-1].strip()
+    if not text or "\n" in text:
+        return None
+
+    try:
+        expr = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        expr = None
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
+        tool = expr.func.id.lower()
+        if tool not in _BARE_FILE_TOOL_NAMES:
+            return None
+        if tool in ("ls", "read_file"):
+            if len(expr.args) == 1 and not expr.keywords:
+                value = _literal_string(expr.args[0])
+                return ToolBlock(tool, value.strip()) if value else None
+            payload = {}
+            for keyword in expr.keywords:
+                if not keyword.arg:
+                    return None
+                value = _literal_jsonable(keyword.value)
+                if value is None:
+                    return None
+                payload[keyword.arg] = value
+            if payload:
+                return ToolBlock(tool, json.dumps(payload))
+            return None
+        payload = {}
+        if len(expr.args) == 1:
+            value = _literal_jsonable(expr.args[0])
+            if isinstance(value, dict):
+                payload.update(value)
+            elif isinstance(value, str):
+                payload["pattern"] = value
+            else:
+                return None
+        elif expr.args:
+            return None
+        for keyword in expr.keywords:
+            if not keyword.arg:
+                return None
+            value = _literal_jsonable(keyword.value)
+            if value is None:
+                return None
+            payload[keyword.arg] = value
+        return ToolBlock(tool, json.dumps(payload)) if payload else None
+
+    match = _BARE_FILE_TOOL_SHELL_RE.match(text)
+    if not match:
+        return None
+    tool = match.group(1).lower()
+    arg = match.group(2).strip()
+    if not arg:
+        return None
+    if (arg.startswith('"') and arg.endswith('"')) or (arg.startswith("'") and arg.endswith("'")):
+        arg = arg[1:-1].strip()
+    if not arg:
+        return None
+    if tool in ("ls", "glob"):
+        shellish = _parse_shellish_ls_or_glob(tool, arg)
+        if shellish:
+            return shellish
+        return None
+    if tool == "grep":
+        shellish = _parse_shellish_grep(arg)
+        if shellish:
+            return shellish
+        if arg.startswith("{"):
+            return ToolBlock(tool, arg)
+        return None
+    return ToolBlock(tool, arg)
+
+
+def _parse_bare_file_tool_calls(text: str) -> List[ToolBlock]:
+    blocks: List[ToolBlock] = []
+    seen = set()
+    for raw_line in text.splitlines():
+        block = _parse_bare_file_tool_call_line(raw_line)
+        if not block:
+            continue
+        key = (block.tool_type, block.content)
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append(block)
+    return blocks
 
 def _parse_tool_call_block(raw: str) -> Optional[ToolBlock]:
     """Parse a [TOOL_CALL] block into a ToolBlock.
@@ -354,15 +697,28 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
         # If a code block's content is an <invoke> XML call (some models wrap
         # tool calls in ```python or ```xml fences), parse the invoke instead.
         if '<invoke' in content:
-            invoked = False
             for inv in _XML_INVOKE_RE.finditer(content):
                 block = _parse_xml_invoke(inv)
                 if block:
                     blocks.append(block)
-                    invoked = True
-            if invoked:
+            # This fenced block is <invoke> markup, not literal code. Whether or
+            # not any call converted, never fall through to append the raw XML as
+            # a python/bash block — e.g. a hyphenated/namespaced tool name that
+            # _XML_INVOKE_RE's \w+ can't match would otherwise be executed as code.
+            continue
+        if tag in ("python", "bash"):
+            block = _parse_misfenced_web_lookup(content)
+            if block:
+                blocks.append(block)
                 continue
         blocks.append(ToolBlock(tag, content))
+
+    # Local-model compatibility: bare dedicated file calls such as
+    # `ls("C:/Projects/x")` or `ls C:/Projects/x` (only if no fenced blocks
+    # found). This catches models that learned function-ish syntax but not
+    # Odysseus' fenced tool convention.
+    if not blocks:
+        blocks = _parse_bare_file_tool_calls(text)
 
     # Pattern 2: [TOOL_CALL] blocks (only if no fenced blocks found)
     if not blocks:

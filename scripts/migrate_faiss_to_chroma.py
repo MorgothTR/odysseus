@@ -11,7 +11,7 @@ Migrates:
 Usage:
     python scripts/migrate_faiss_to_chroma.py
 
-Requires: faiss-cpu, chromadb-client, and the embedding endpoint to be running.
+Requires: faiss-cpu, chromadb, and an embedding provider.
 """
 
 import json

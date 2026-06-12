@@ -18,10 +18,22 @@ import ntpath
 import shutil
 import subprocess
 from pathlib import Path
+import sys
 from typing import List, Optional
+import platform
 
 IS_WINDOWS = os.name == "nt"
 IS_POSIX = not IS_WINDOWS
+# Allows APFEL support and ARM-native binary recommendations on Apple Silicon Macs.
+IS_APPLE_SILICON = (
+    IS_POSIX
+    and platform.system() == "Darwin"
+    and platform.machine().lower()
+    in {
+        "arm64",
+        "aarch64",
+    }
+)
 
 
 # ── File permissions ────────────────────────────────────────────────────────
@@ -53,9 +65,8 @@ def detached_popen_kwargs() -> dict:
     and is detached from any console.
     """
     if IS_WINDOWS:
-        flags = (
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) | getattr(
+            subprocess, "DETACHED_PROCESS", 0x00000008
         )
         return {"creationflags": flags}
     return {"start_new_session": True}
@@ -178,6 +189,21 @@ def _is_windows_bash_stub(path: str) -> bool:
         or "sysnative\\bash.exe" in lowered
         or "windowsapps\\bash.exe" in lowered
     )
+
+
+def git_bash_path(path: str | Path) -> str:
+    """Convert a path to POSIX style suitable for Git Bash on Windows.
+
+    Transforms drive letters (e.g., 'C:\\path') to POSIX '/c/path',
+    and uses forward slashes.
+    """
+    p = Path(path)
+    p_str = p.as_posix()
+    if IS_WINDOWS and len(p_str) >= 2 and p_str[1] == ":":
+        drive = p_str[0].lower()
+        return f"/{drive}{p_str[2:]}"
+    return p_str
+
 
 
 def find_bash() -> Optional[str]:

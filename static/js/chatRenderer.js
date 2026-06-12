@@ -9,6 +9,7 @@ import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
+import { openResearchReport } from './research/reportOpen.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
@@ -537,6 +538,39 @@ export function shortModel(name) {
   return short;
 }
 
+function modelValue(name) {
+  if (name == null) return '';
+  return String(name).trim();
+}
+
+export function sameModelName(left, right) {
+  const a = modelValue(left);
+  const b = modelValue(right);
+  if (!a || !b) return false;
+  return a.toLowerCase() === b.toLowerCase()
+    || shortModel(a).toLowerCase() === shortModel(b).toLowerCase();
+}
+
+export function modelRouteLabel(requestedModel, actualModel) {
+  const requested = modelValue(requestedModel);
+  const actual = modelValue(actualModel) || requested;
+  if (!requested || sameModelName(requested, actual)) return shortModel(actual || requested);
+  return shortModel(requested) + ' -> ' + shortModel(actual);
+}
+
+export function replyModelPair(modelName, metadata) {
+  const meta = metadata || {};
+  const actualFromMeta = modelValue(meta.model || meta.actual_model);
+  const requestedFromMeta = modelValue(meta.requested_model || meta.selected_model);
+  if (actualFromMeta || requestedFromMeta) {
+    const actual = actualFromMeta || requestedFromMeta || modelValue(modelName);
+    const requested = requestedFromMeta || actual;
+    return { requestedModel: requested, actualModel: actual };
+  }
+  const fallback = modelValue(modelName);
+  return { requestedModel: fallback, actualModel: fallback };
+}
+
 /**
  * Generate a consistent HSL color for a model name.
  * Returns an hsl() string. The hue is derived from a string hash,
@@ -577,7 +611,11 @@ export function applyModelColor(roleEl, modelName) {
   }
   // Replace generic dot with provider logo if available
   const logo = providerLogo(modelName);
-  if (logo && !roleEl.querySelector('.role-provider-logo')) {
+  const existingLogo = roleEl.querySelector('.role-provider-logo');
+  if (!logo) {
+    if (existingLogo) existingLogo.remove();
+    roleEl.classList.remove('has-logo');
+  } else if (!existingLogo) {
     const span = document.createElement('span');
     span.className = 'role-provider-logo';
     span.innerHTML = logo;
@@ -914,8 +952,6 @@ function _appendContinuePrompt(container) {
   container.appendChild(wrap);
 }
 function _appendReportButton(container, sessionId) {
-  var apiBase = window.API_BASE || '';
-
   // Wrapper holds report button + chat-about button
   var wrap = document.createElement('div');
   wrap.className = 'report-btn-wrap';
@@ -925,9 +961,8 @@ function _appendReportButton(container, sessionId) {
   btn.className = 'view-report-btn';
   btn.innerHTML = REPORT_ICON + ' Open Visual Report';
 
-  var reportUrl = apiBase + '/api/research/report/' + sessionId;
   btn.addEventListener('click', function() {
-    window.open(reportUrl, '_blank');
+    openResearchReport(sessionId);
   });
   wrap.appendChild(btn);
 
@@ -1005,7 +1040,12 @@ document.addEventListener('click', function(e) {
 // matching module via a dynamic import (avoids circular deps —
 // sessions.js itself imports chatRenderer.js).
 document.addEventListener('click', function(e) {
-  const a = e.target && e.target.closest && e.target.closest('a[href]');
+  // Walk past Text nodes — clicking link text yields a Text node target
+  // whose .closest is undefined, so preventDefault never fires and the
+  // browser performs a default hash-navigation that resets the session.
+  let _t = e.target;
+  while (_t && _t.nodeType === Node.TEXT_NODE) _t = _t.parentElement;
+  const a = _t && _t.closest && _t.closest('a[href]');
   if (!a) return;
   const href = a.getAttribute('href') || '';
   if (!href.startsWith('#')) return;
@@ -1928,8 +1968,12 @@ export function addMessage(role, content, modelName, metadata) {
           wrap.className = 'msg msg-ai' + (r > 0 ? ' msg-continuation' : '');
           const roleEl = document.createElement('div');
           roleEl.className = 'role';
-          const contModel = modelName || metadata?.model;
-          roleEl.textContent = shortModel(contModel);
+          const pair = replyModelPair(modelName, metadata);
+          const contModel = pair.actualModel || pair.requestedModel;
+          roleEl.textContent = modelRouteLabel(pair.requestedModel, contModel);
+          if (pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
+            roleEl.title = pair.requestedModel + ' -> ' + contModel;
+          }
           applyModelColor(roleEl, contModel);
           if (r === 0) roleEl.appendChild(roleTimestamp(metadata?.timestamp));
           wrap.appendChild(roleEl);
@@ -2052,8 +2096,9 @@ export function addMessage(role, content, modelName, metadata) {
     r.className = 'role';
     const isSlash = metadata?.source === 'slash';
     const isCompacted = metadata?.compacted;
-    const resolvedModel = modelName || metadata?.model;
-    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Odysseus' : shortModel(resolvedModel);
+    const replyModels = replyModelPair(modelName, metadata);
+    const resolvedModel = replyModels.actualModel || replyModels.requestedModel;
+    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Odysseus' : modelRouteLabel(replyModels.requestedModel, resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
     }
@@ -2064,6 +2109,9 @@ export function addMessage(role, content, modelName, metadata) {
     }
     r.textContent = _roleText;
     if (role !== 'user') {
+      if (!isSlash && !isCompacted && replyModels.requestedModel && resolvedModel && !sameModelName(replyModels.requestedModel, resolvedModel)) {
+        r.title = replyModels.requestedModel + ' -> ' + resolvedModel;
+      }
       if (!isSlash && !isCompacted) applyModelColor(r, resolvedModel);
       r.appendChild(roleTimestamp(metadata?.timestamp));
     }
@@ -2330,6 +2378,9 @@ export function addMessage(role, content, modelName, metadata) {
 
 const chatRenderer = {
   shortModel,
+  sameModelName,
+  modelRouteLabel,
+  replyModelPair,
   modelColor,
   applyModelColor,
   getModelCost,
