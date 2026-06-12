@@ -185,6 +185,10 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
+    "swarm": "run_code_review_swarm",
+    "code_review_swarm": "run_code_review_swarm",
+    "review_swarm": "run_code_review_swarm",
+    "run_code_review_swarm": "run_code_review_swarm",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

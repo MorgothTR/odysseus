@@ -144,6 +144,28 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "run_code_review_swarm",
+            "description": "Run a read-only local code review swarm over an allowed folder. Uses 5 specialist reviewers by default, max 10. Use when the user asks for a swarm, multi-agent review, parallel audit, repo audit, or code quality review. Confined to allowed local folders and does not write files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Allowed local folder to review"},
+                    "goal": {"type": "string", "description": "Review goal or focus, e.g. code quality, security, tests"},
+                    "agent_count": {"type": "integer", "description": "Number of specialist reviewers to run; default 5, max 10"},
+                    "agents": {
+                        "type": "array",
+                        "description": "Optional specialist reviewer roles, e.g. architecture, security, tests",
+                        "items": {"type": "string"}
+                    },
+                    "model": {"type": "string", "description": "Optional model name or model@endpoint override; defaults to Utility/Default"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk under allowed roots, including admin-selected Local File Access folders. Use for creating files or full rewrites. Do not use shell redirects as a workaround if this rejects a path.",
             "parameters": {
@@ -1244,7 +1266,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")

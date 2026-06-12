@@ -98,6 +98,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "grep": "Search file CONTENTS for a regex across a directory tree (ripgrep-backed, honours .gitignore). Returns file:line:match. Use to find where code/symbols/strings live — prefer over bash grep.",
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
+    "run_code_review_swarm": "Run a read-only local code review swarm over an allowed folder. Uses 5 specialist reviewers by default (max 10), then synthesizes findings. Use for multi-agent reviews, swarm audits, code quality reviews, security/test/performance review, and repo audits. Confined to allowed local folders; does not write files.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
@@ -474,6 +475,14 @@ class ToolIndex:
                    "what models do i have", "is it downloaded",
                    "do i have", "already downloaded", "on disk"}):
             {"list_cached_models", "search_hf_models"},
+        # Local code review swarm. Keep this distinct from generic "review"
+        # so ordinary proofreading/document review does not trigger it.
+        frozenset({"swarm", "agent swarm", "multi-agent review", "multi agent review",
+                   "parallel review", "parallel audit", "code review swarm",
+                   "review code quality", "code quality review", "audit code",
+                   "audit the repo", "audit repository", "review repository",
+                   "review this repo", "review this codebase"}):
+            {"run_code_review_swarm", "grep", "glob", "ls", "read_file"},
         # Tool on/off / panel open intent — user says "turn off shell",
         # "disable search", "open library", "show gallery", etc.
         frozenset({"turn off", "turn on", "disable", "enable",

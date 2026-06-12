@@ -269,6 +269,12 @@ Search file contents under an allowed folder. Prefer this over shell grep/rg so 
 ```
 Find files by glob pattern under an allowed folder, newest first. Prefer this over shell find/dir.""",
 
+    "run_code_review_swarm": """\
+```run_code_review_swarm
+{"path": "<allowed folder path>", "goal": "review code quality", "agent_count": 5}
+```
+Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files.""",
+
     "write_file": """\
 ```write_file
 <file path>
@@ -542,6 +548,7 @@ _ADMIN_SCHEMA_NAMES = frozenset([
     "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
     "create_session", "list_sessions", "send_to_session", "pipeline",
     "ask_teacher", "list_models", "search_chats",
+    "run_code_review_swarm",
 ])
 _TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
 
@@ -598,6 +605,7 @@ _ADMIN_KEYWORDS = [
     # agent flails (curl, bash) instead of using the right tool.
     "document", "documents", "doc", "docs", "library", "tidy",
     "note", "notes", "todo", "todos", "reminder", "reminders",
+    "swarm", "code review", "review code", "code quality",
 ]
 
 def _detect_admin_intent(messages: List[Dict]) -> bool:

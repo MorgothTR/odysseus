@@ -1338,6 +1338,18 @@ async def execute_tool_block(
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool == "run_code_review_swarm":
+        from src.code_review_swarm import run_code_review_swarm
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"run_code_review_swarm: {first_line}"
+        result = await run_code_review_swarm(
+            content,
+            owner=owner,
+            session_id=session_id,
+            workspace=workspace,
+            progress_cb=progress_cb,
+        )
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"
