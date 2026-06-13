@@ -179,11 +179,19 @@ async def test_agentic_mode_runs_subagent_reviewers(monkeypatch, tmp_path):
         assert os.path.realpath(call["root"]) == os.path.realpath(str(repo))
 
 
-def test_agentic_arg_parses():
+def test_agentic_arg_parses_with_aliases():
     from src.code_review_swarm import _parse_args
 
     assert _parse_args(json.dumps({"path": "C:/x"})).agentic is False
     assert _parse_args(json.dumps({"path": "C:/x", "agentic": True})).agentic is True
+    # Models reach for these natural variants; all must work (a wrong key used
+    # to silently fall back to snapshot mode).
+    assert _parse_args(json.dumps({"path": "C:/x", "agentic_mode": True})).agentic is True
+    assert _parse_args(json.dumps({"path": "C:/x", "agent_mode": True})).agentic is True
+    assert _parse_args(json.dumps({"path": "C:/x", "deep": True})).agentic is True
+    # String form (some models emit "true" not true).
+    assert _parse_args(json.dumps({"path": "C:/x", "agentic": "true"})).agentic is True
+    assert _parse_args(json.dumps({"path": "C:/x", "agentic": "false"})).agentic is False
 
 
 @pytest.mark.asyncio

@@ -134,6 +134,14 @@ def _clamp_int(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, parsed))
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1", "on")
+    return bool(value)
+
+
 def _normalize_role_name(role: Any) -> str:
     text = str(role or "").strip().lower()
     text = "".join(ch if ch.isalnum() or ch in ("-", "_", " ") else " " for ch in text)
@@ -194,7 +202,9 @@ def _parse_args(content: str) -> SwarmArgs:
     snippet_chars = _clamp_int(
         data.get("snippet_chars"), default_snippet, 1_000, MAX_SNIPPET_CHARS_CEILING
     )
-    agentic = bool(data.get("agentic", False))
+    # Accept the natural aliases a model reaches for ("agentic_mode",
+    # "agent_mode", "deep") — a wrong key silently fell back to snapshot mode.
+    agentic = any(_truthy(data.get(k)) for k in ("agentic", "agentic_mode", "agent_mode", "deep"))
     return SwarmArgs(
         path=path, goal=goal, roles=_select_roles(data), model=model,
         max_files=max_files, snapshot_chars=snapshot_chars, snippet_chars=snippet_chars,
