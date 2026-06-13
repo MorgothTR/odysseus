@@ -1959,12 +1959,16 @@ export function addMessage(role, content, modelName, metadata) {
 
       const maxRound = Math.max(...Object.keys(toolsByRound).map(Number), roundTexts.length);
 
-      // Reasoning-model thinking is saved separately (metadata.thinking) and has
-      // no slot in roundTexts/tool_events, so this agent reconstruction would drop
-      // it — unlike the plain-message path below. Render it once as a leading
-      // collapsible so it survives reload (it streamed live but otherwise vanishes
-      // when the user navigates away and back).
-      if (metadata.thinking) {
+      // Reasoning-model thinking has no slot in roundTexts/tool_events, so this
+      // agent reconstruction must render it explicitly or it vanishes on reload.
+      // Preferred: per-round reasoning (metadata.round_reasonings, aligned with
+      // roundTexts) rendered where each round happened, so multi-round thinking
+      // survives reload interleaved with the tool dividers — matching the live
+      // view. Fallback (older messages): metadata.thinking as one leading block.
+      const roundReasonings = metadata.round_reasonings || [];
+      const hasPerRoundThinking = roundReasonings.some(rr => rr && String(rr).trim());
+
+      const makeThinkBubble = (thinkingText) => {
         const tWrap = document.createElement('div');
         tWrap.className = 'msg msg-ai';
         const tRole = document.createElement('div');
@@ -1979,15 +1983,25 @@ export function addMessage(role, content, modelName, metadata) {
         tBody.className = 'body';
         const tTime = metadata.thinking_time || null;
         tBody.innerHTML = markdownModule.processWithThinking(
-          '<think' + (tTime ? ` time="${tTime}"` : '') + '>' + metadata.thinking + '</think>'
+          '<think' + (tTime ? ` time="${tTime}"` : '') + '>' + thinkingText + '</think>'
         );
         tWrap.appendChild(tBody);
-        box.appendChild(tWrap);
+        return tWrap;
+      };
+
+      if (!hasPerRoundThinking && metadata.thinking) {
+        box.appendChild(makeThinkBubble(metadata.thinking));
       }
 
       for (let r = 0; r < maxRound; r++) {
         const roundNum = r + 1;
         const txt = (roundTexts[r] || '').trim();
+
+        // This round's reasoning renders before its text and tool calls.
+        if (hasPerRoundThinking) {
+          const rr = (roundReasonings[r] || '').trim();
+          if (rr) box.appendChild(makeThinkBubble(rr));
+        }
 
         if (txt) {
           const wrap = document.createElement('div');

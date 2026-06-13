@@ -1369,6 +1369,7 @@ def _compute_final_metrics(
     has_real_usage: bool,
     tool_events: list,
     round_texts: list,
+    round_reasonings: Optional[list] = None,
     model: str = "",
     last_round_input_tokens: int = 0,
     prep_timings: Optional[Dict[str, float]] = None,
@@ -1426,6 +1427,10 @@ def _compute_final_metrics(
     if tool_events:
         metrics["tool_events"] = tool_events
         metrics["round_texts"] = round_texts
+        # Only ship per-round reasoning when at least one round actually has it —
+        # keeps the metadata small for tool turns the model didn't narrate.
+        if round_reasonings and any((rr or "").strip() for rr in round_reasonings):
+            metrics["round_reasonings"] = round_reasonings
     return metrics
 
 
@@ -1916,6 +1921,7 @@ async def stream_agent_loop(
     first_token_received = False
     tool_events = []   # Persist tool executions for history reload
     round_texts = []   # Cleaned text per round for history reload
+    round_reasonings = []  # Reasoning (thinking) per round, parallel to round_texts — lets the agent reload render each round's thinking interleaved instead of one flattened blob
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
     # on such turns and at most _VERIFIER_MAX_ROUNDS times.
@@ -2290,6 +2296,10 @@ async def stream_agent_loop(
         # otherwise it streams once and then disappears on reload (#3222 follow-up).
         cleaned_round = strip_tool_blocks(round_response, skip_fenced=(_is_api_model and not used_native)).strip()
         round_texts.append(cleaned_round)
+        # Capture this round's reasoning in lockstep with its text so the agent
+        # reload can show each round's thinking where it happened (interleaved
+        # with the tool dividers), instead of one flattened block at the top.
+        round_reasonings.append((round_reasoning or "").strip())
 
         if not tool_blocks:
             # ── Completion verifier (mechanism 3a) ────────────────────
@@ -2801,7 +2811,8 @@ async def stream_agent_loop(
     metrics = _compute_final_metrics(
         messages, full_response, total_duration, time_to_first_token,
         context_length, real_input_tokens, real_output_tokens,
-        has_real_usage, tool_events, round_texts, model=actual_model,
+        has_real_usage, tool_events, round_texts,
+        round_reasonings=round_reasonings, model=actual_model,
         last_round_input_tokens=last_round_input_tokens,
         prep_timings=prep_timings,
         backend_gen_tps=backend_gen_tps,

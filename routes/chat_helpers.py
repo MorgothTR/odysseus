@@ -830,7 +830,11 @@ def save_assistant_response(
     # of vanishing when the user navigates away and back. Stored in metadata only —
     # never folded into _content — so it stays out of the API resend path.
     if reasoning and reasoning.strip():
-        if not md.get("thinking"):
+        # Agent turns carry per-round reasoning in metadata.round_reasonings (set
+        # from the agent metrics); the agent renderer prefers that, so don't ALSO
+        # flatten it into a single metadata.thinking. Plain chats have no
+        # round_reasonings and still get the one thinking block.
+        if not md.get("thinking") and not md.get("round_reasonings"):
             md["thinking"] = reasoning.strip()
         # The reasoning lives in metadata now, so the content must carry NO think
         # markup. Reasoning models occasionally leak a lone <think>/</think> at the
