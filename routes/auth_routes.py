@@ -452,6 +452,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         _INT_RANGES = {
             "agent_max_rounds": (1, 200),
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
+            "subagent_timeout_seconds": (0, 3600),  # 0 = no wall-clock cap
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:

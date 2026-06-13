@@ -73,6 +73,17 @@ def _clamp_rounds(value: Any) -> int:
     return max(1, min(MAX_SPAWN_ROUNDS, parsed))
 
 
+def _subagent_timeout() -> Optional[float]:
+    """Per-child wall-clock cap from settings (0/unset disables it)."""
+    try:
+        from src.settings import get_setting
+
+        secs = float(get_setting("subagent_timeout_seconds", 600) or 0)
+    except Exception:
+        secs = 600.0
+    return secs if secs > 0 else None
+
+
 def _normalize_tasks(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Accept either a single task ({goal, context, tools}) or {"tasks": [...]}."""
     raw_tasks = data.get("tasks")
@@ -139,6 +150,7 @@ async def spawn_agent(
 
         max_rounds = _clamp_rounds(data.get("max_rounds"))
         candidates, selected_model = resolve_subagent_candidates(str(data.get("model") or "").strip(), owner)
+        timeout = _subagent_timeout()
 
         sem = asyncio.Semaphore(MAX_CONCURRENT_CHILDREN)
 
@@ -155,6 +167,7 @@ async def spawn_agent(
                         max_rounds=max_rounds,
                         owner=owner,
                         label=task["label"],
+                        timeout=timeout,
                     )
                 except Exception as exc:  # one child failing must not sink the rest
                     return {"task_index": index, "label": task["label"], "status": "error",

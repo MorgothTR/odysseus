@@ -132,6 +132,16 @@ DEFAULT_SETTINGS = {
     "utility_model_fallbacks": [],
     "teacher_model": "",
     "teacher_enabled": False,
+    # Sub-agents (code review swarm reviewers + spawn_agent children). When set,
+    # this model is used for sub-agents instead of the Utility model — point it
+    # at a fast, low-reasoning code model (e.g. kimi-k2.7-code) so sub-agents
+    # don't churn. A per-call `model` arg still overrides this. Empty = inherit
+    # the Utility model.
+    "subagent_model": "",
+    # Wall-clock cap (seconds) per sub-agent, so a model that hangs or churns on
+    # a bad call is killed instead of grinding to the round cap. 0 disables it
+    # (rely on the round cap alone).
+    "subagent_timeout_seconds": 600,
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)
     # DRAFT skill to be injected into the agent prompt. Published skills always
     # qualify. Keeps low-confidence auto-skills out of context until they're

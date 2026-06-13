@@ -145,7 +145,7 @@ async def test_agentic_mode_runs_subagent_reviewers(monkeypatch, tmp_path):
 
     subagent_calls = []
 
-    async def fake_run_subagent(*, goal, system_prompt, candidate, root, toolset, fallbacks, max_rounds, owner):
+    async def fake_run_subagent(*, goal, system_prompt, candidate, root, toolset, fallbacks, max_rounds, owner, label=None, timeout=None):
         subagent_calls.append({"root": root, "toolset": set(toolset), "max_rounds": max_rounds})
         role = "reviewer"
         for line in system_prompt.splitlines():

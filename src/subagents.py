@@ -68,8 +68,20 @@ def confine_child_toolset(requested: Optional[Set[str]]) -> Set[str]:
 
 
 def resolve_subagent_candidates(model_spec: str, owner: Optional[str]) -> Tuple[List[Candidate], str]:
-    """Resolve the model endpoint(s) a sub-agent runs on: an explicit override,
-    else the configured Utility/Default model plus its fallback chain."""
+    """Resolve the model endpoint(s) a sub-agent runs on.
+
+    Precedence: an explicit per-call ``model_spec`` > the ``subagent_model``
+    setting > the configured Utility/Default model plus its fallback chain.
+    The setting lets the user point all sub-agents at a fast code model (e.g.
+    kimi-k2.7-code) without passing it on every call."""
+    if not model_spec:
+        try:
+            from src.settings import get_setting
+
+            model_spec = str(get_setting("subagent_model", "") or "").strip()
+        except Exception:
+            model_spec = ""
+
     if model_spec:
         from src.ai_interaction import _resolve_model
 
@@ -125,6 +137,7 @@ async def run_subagent(
     max_rounds: int = DEFAULT_SUBAGENT_ROUNDS,
     owner: Optional[str] = None,
     label: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> str:
     """Drive a confined, bounded agent loop and return its final text.
 
@@ -133,10 +146,18 @@ async def run_subagent(
     always-available set can hand it bash/write/spawn), and — when ``root`` is
     set — file access confined to that folder (same policy as the file tools).
 
+    ``timeout`` (seconds, optional) is a wall-clock cap: if the child exceeds it,
+    the agent loop is cancelled and whatever it had written so far is returned
+    (or grace-summarized). This catches a model that hangs or churns on a bad
+    call, which the round cap alone cannot — a single wedged LLM call never
+    advances a round.
+
     Returns the model's final text, or a grace summary of its tool activity if
-    it ran out of rounds without a written answer (so the caller always gets
-    something actionable). Returns "" only if even the grace summary fails.
+    it ran out of rounds (or timed out) without a written answer, so the caller
+    always gets something. Returns "" only if even the grace summary fails.
     """
+    import asyncio
+
     from src.agent_loop import stream_agent_loop
 
     url, model, headers = candidate
@@ -152,8 +173,9 @@ async def run_subagent(
 
     full_text = ""
     tool_results: List[str] = []
-    sid = _register_subagent(label or goal.splitlines()[0] if goal else "subagent", model)
-    try:
+
+    async def _consume() -> None:
+        nonlocal full_text
         async for event_str in stream_agent_loop(
             endpoint_url=url,
             model=model,
@@ -184,6 +206,18 @@ async def run_subagent(
                 summary = data.get("stdout") or data.get("output") or data.get("result") or ""
                 if isinstance(summary, str) and summary.strip():
                     tool_results.append(f"[{data.get('tool', '?')}] {summary[:400]}")
+
+    sid = _register_subagent(label or goal.splitlines()[0] if goal else "subagent", model)
+    try:
+        if timeout and timeout > 0:
+            try:
+                await asyncio.wait_for(_consume(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Cancelling _consume propagates into stream_agent_loop, which
+                # tears the wedged call down. Keep whatever was written so far.
+                logger.info("subagent timed out after %ss (label=%r)", timeout, label)
+        else:
+            await _consume()
     finally:
         _unregister_subagent(sid)
 

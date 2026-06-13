@@ -92,8 +92,8 @@ def test_spawn_agent_fans_out_in_parallel(monkeypatch):
     _patch_candidates(monkeypatch)
     seen = []
 
-    async def fake_run_subagent(*, goal, system_prompt, candidate, root, toolset, fallbacks, max_rounds, owner, label):
-        seen.append({"label": label, "toolset": set(toolset), "max_rounds": max_rounds, "root": root})
+    async def fake_run_subagent(*, goal, system_prompt, candidate, root, toolset, fallbacks, max_rounds, owner, label, timeout=None):
+        seen.append({"label": label, "toolset": set(toolset), "max_rounds": max_rounds, "root": root, "timeout": timeout})
         return f"summary for {label}"
 
     monkeypatch.setattr("src.spawn_agent.run_subagent", fake_run_subagent)

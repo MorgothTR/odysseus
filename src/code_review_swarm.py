@@ -517,6 +517,12 @@ async def _run_reviewer_agent(
     {role, output, ok} shape as the snapshot reviewer so synthesis is unchanged."""
     from src.subagents import run_subagent, READONLY_TOOLSET
 
+    try:
+        from src.settings import get_setting
+        _timeout = float(get_setting("subagent_timeout_seconds", 600) or 0) or None
+    except Exception:
+        _timeout = 600.0
+
     user_message = (
         f"Review goal:\n{goal}\n\n"
         f"You are reviewing the code under your accessible root for the '{role}' perspective. "
@@ -533,6 +539,8 @@ async def _run_reviewer_agent(
             fallbacks=candidates[1:],
             max_rounds=AGENTIC_REVIEWER_ROUNDS,
             owner=owner,
+            label=f"review:{role}",
+            timeout=_timeout,
         )
         stripped = (output or "").strip()
         if stripped:

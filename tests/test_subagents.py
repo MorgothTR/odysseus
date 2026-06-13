@@ -101,6 +101,43 @@ async def test_run_subagent_returns_empty_when_grace_fails(monkeypatch):
     assert result == ""
 
 
+@pytest.mark.asyncio
+async def test_run_subagent_honors_wall_clock_timeout(monkeypatch):
+    import asyncio
+
+    async def hanging_stream(**kwargs):
+        yield 'data: {"delta": "partial findings before the hang"}\n\n'
+        await asyncio.sleep(30)  # wedged call the round cap can't catch
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr("src.agent_loop.stream_agent_loop", hanging_stream)
+
+    result = await run_subagent(
+        goal="g", system_prompt="s", candidate=("u", "m", {}), timeout=0.2
+    )
+    # Timed out, but returns what the child had written before the hang.
+    assert result == "partial findings before the hang"
+
+
+def test_subagent_model_setting_overrides_utility(monkeypatch):
+    from src.subagents import resolve_subagent_candidates
+
+    monkeypatch.setattr(
+        "src.settings.get_setting",
+        lambda key, default=None: "kimi-k2.7-code" if key == "subagent_model" else default,
+    )
+    monkeypatch.setattr(
+        "src.ai_interaction._resolve_model",
+        lambda spec, owner=None: ("http://local/v1/chat/completions", spec, {}),
+    )
+    # No per-call model -> falls back to the subagent_model setting (not Utility).
+    candidates, model = resolve_subagent_candidates("", owner=None)
+    assert model == "kimi-k2.7-code"
+    # An explicit per-call model still wins over the setting.
+    candidates2, model2 = resolve_subagent_candidates("some-other-model", owner=None)
+    assert model2 == "some-other-model"
+
+
 def test_readonly_toolset_has_no_mutators():
     for mutator in ("bash", "python", "write_file", "edit_file", "run_code_review_swarm"):
         assert mutator not in READONLY_TOOLSET
