@@ -1263,13 +1263,29 @@ import { createStreamRenderer } from './streamingRenderer.js';
             .replace(/<channel\|>/gi, '')
             .trim();
           const lines = thinkContent.split('\n').length;
-          // Don't show beforeThink text during streaming — it'll appear in the final render
-          // This prevents the "split into two" duplication
+          // Don't show beforeThink text during streaming — it'll appear in the final
+          // render (prevents the "split into two" duplication). Build the placeholder
+          // as a REAL collapsible (data-thinking-id + content div + toggle) so it's
+          // clickable even when a thinking-only round is immediately followed by a
+          // tool call and never gets a post-close content delta to heal it — that was
+          // the orphaned, non-clickable "Thinking (N lines)" bug. Collapsed by default.
+          const _phId = 'live-think-ph-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
           contentEl.innerHTML =
-            '<div class="thinking-section"><div class="thinking-header"><div class="thinking-header-left">Thinking' +
-            (lines > 1 ? ` (${lines} lines)` : '') + '</div></div></div>';
-          // The stream renderer self-heals when it next sees this overwritten
-          // container (streamingRenderer.js), so no explicit reset is needed here.
+            '<div class="thinking-section">' +
+              '<div class="thinking-header" data-thinking-id="' + _phId + '">' +
+                '<div class="thinking-header-left">Thinking' +
+                  (lines > 1 ? ` (${lines} lines)` : '') + '</div>' +
+                '<span class="thinking-toggle" id="' + _phId + '-toggle"></span>' +
+              '</div>' +
+              '<div class="thinking-content" id="' + _phId + '">' +
+                '<div class="thinking-content-inner"></div>' +
+              '</div>' +
+            '</div>';
+          const _phInner = contentEl.querySelector('.thinking-content-inner');
+          if (_phInner) _phInner.textContent = thinkContent;   // textContent = safe, no HTML injection
+          // When the think closes, the next content delta re-renders via
+          // processWithThinking (streamingRenderer.js) and replaces this. If a tool
+          // call comes first, this clickable placeholder stays — readable on click.
           uiModule.scrollHistory();
           return;
         }
