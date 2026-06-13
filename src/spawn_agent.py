@@ -50,14 +50,18 @@ _SYSTEM_PROMPT = (
     "web_search/web_fetch). bash, python, and any write/edit tools are NOT "
     "available — do not attempt them, it only wastes your limited steps.\n"
     "read_file truncates large files. If a file is truncated, call read_file "
-    "again with an offset to page through the rest, e.g. "
-    '{"path": "big.py", "offset": 400}. Use grep to jump straight to the lines '
-    "that matter instead of reading whole large files.\n"
-    "You have a limited number of steps, so be efficient: grep for what you "
-    "need, read only the relevant parts, then STOP and write your answer. "
-    "Return a concise, self-contained deliverable the parent can use directly "
-    "(findings, a summary, an answer) — it sees only your final message, not "
-    "your steps. Do not narrate your process; give the result."
+    "again with an offset to page through the REST — do not stop at the first "
+    'page (e.g. {"path": "big.py", "offset": 400}). Use grep to jump to '
+    "relevant lines, but when the task targets a specific file, read that whole "
+    "file before concluding.\n"
+    "Be THOROUGH on exactly what you were asked. If the task is to audit or "
+    "review a file, read the ENTIRE file and address every aspect the goal "
+    "names (bugs, edge cases, leaks, error handling) with file:line references "
+    "— do not answer from a partial read, and do not wander into unrelated "
+    "code. When you have genuinely covered the goal, STOP and write the answer. "
+    "Return a concise, self-contained deliverable the parent can use directly — "
+    "it sees only your final message, not your steps. Do not narrate your "
+    "process; give the result."
 )
 
 
@@ -82,7 +86,13 @@ def _normalize_tasks(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        goal = str(item.get("goal") or item.get("task") or "").strip()
+        # Accept the field names a model reaches for — goal/task/prompt/
+        # instructions/description all mean "what to do". A wrong key used to
+        # bounce the call ("needs a goal") before the model found the right one.
+        goal = str(
+            item.get("goal") or item.get("task") or item.get("prompt")
+            or item.get("instructions") or item.get("description") or ""
+        ).strip()
         if not goal:
             continue
         context = str(item.get("context") or "").strip()

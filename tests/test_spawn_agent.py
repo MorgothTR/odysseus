@@ -132,6 +132,24 @@ def test_spawn_agent_single_task_form(monkeypatch):
     assert result["spawn"]["results"][0]["status"] == "completed"
 
 
+def test_spawn_agent_accepts_goal_aliases(monkeypatch):
+    _patch_candidates(monkeypatch)
+    captured = {}
+
+    async def fake_run_subagent(*, goal, **kwargs):
+        captured["goal"] = goal
+        return "done"
+
+    monkeypatch.setattr("src.spawn_agent.run_subagent", fake_run_subagent)
+    # The model passed "prompt" instead of "goal" in a live run; that and other
+    # natural field names must work instead of bouncing the call.
+    for key in ("prompt", "instructions", "description", "task"):
+        captured.clear()
+        result = asyncio.run(spawn_agent(json.dumps({key: f"do via {key}"}), owner="admin"))
+        assert result["exit_code"] == 0, key
+        assert f"do via {key}" in captured["goal"]
+
+
 def test_spawn_agent_requires_a_goal(monkeypatch):
     _patch_candidates(monkeypatch)
     result = asyncio.run(spawn_agent(json.dumps({"context": "no goal here"}), owner="admin"))
