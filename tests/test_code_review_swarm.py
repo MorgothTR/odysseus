@@ -88,6 +88,73 @@ async def test_code_review_swarm_skips_sensitive_files_before_llm(monkeypatch, t
     assert "SECRET KEY MATERIAL" not in joined
 
 
+def _role_of(messages):
+    """Pull the reviewer role out of a review prompt, or None for synthesis."""
+    user = messages[-1]["content"]
+    for line in user.splitlines():
+        if line.startswith("Your specialist role:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+@pytest.mark.asyncio
+async def test_swarm_synthesizes_from_surviving_reviewers(monkeypatch, tmp_path):
+    # Some reviewers return empty (thinking model burned its budget); the swarm
+    # must synthesize from the survivors and report the shortfall, not break.
+    repo = tmp_path / "project"
+    repo.mkdir()
+    (repo / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+
+    empty_roles = {"security", "tests"}
+    synth_inputs = {}
+
+    async def fake_llm(_candidates, messages, *, max_tokens):
+        role = _role_of(messages)
+        if role is None:  # synthesis call
+            synth_inputs["text"] = messages[-1]["content"]
+            return "## Summary\nSynthesized from the reviewers that responded."
+        if role in empty_roles:
+            return "   "  # whitespace-only → treated as empty
+        return f"- {role}: a concrete finding with evidence."
+
+    monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: [str(tmp_path)])
+    monkeypatch.setattr("src.code_review_swarm._resolve_candidates", lambda model, owner: ([("http://local/v1/chat/completions", "review-model", {})], "review-model"))
+    monkeypatch.setattr("src.code_review_swarm._call_llm", fake_llm)
+
+    result = await run_code_review_swarm(json.dumps({"path": str(repo)}), owner="admin")
+
+    assert result["exit_code"] == 0
+    swarm = result["swarm"]
+    assert swarm["reviewers_succeeded"] == 3
+    assert set(swarm["reviewers_failed"]) == empty_roles
+    # Header is honest about the shortfall.
+    assert "3/5 produced findings" in result["output"]
+    # Synthesis only saw the survivors — no empty placeholders fed in.
+    assert "security" not in synth_inputs["text"]
+    assert "(reviewer returned an empty response)" not in synth_inputs["text"]
+
+
+@pytest.mark.asyncio
+async def test_swarm_fails_loudly_when_all_reviewers_empty(monkeypatch, tmp_path):
+    # If every reviewer comes back blank, return an error instead of an
+    # authoritative-looking but empty report.
+    repo = tmp_path / "project"
+    repo.mkdir()
+    (repo / "app.py").write_text("print('hi')\n", encoding="utf-8")
+
+    async def empty_llm(_candidates, messages, *, max_tokens):
+        return ""
+
+    monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: [str(tmp_path)])
+    monkeypatch.setattr("src.code_review_swarm._resolve_candidates", lambda model, owner: ([("http://local/v1/chat/completions", "review-model", {})], "review-model"))
+    monkeypatch.setattr("src.code_review_swarm._call_llm", empty_llm)
+
+    result = await run_code_review_swarm(json.dumps({"path": str(repo)}), owner="admin")
+
+    assert result["exit_code"] == 1
+    assert "every reviewer returned empty or failed" in result["error"]
+
+
 def test_snapshot_chars_arg_widens_and_clamps():
     from src.code_review_swarm import (
         MAX_SNAPSHOT_CHARS,

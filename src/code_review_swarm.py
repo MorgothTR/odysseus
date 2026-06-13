@@ -484,9 +484,10 @@ async def run_code_review_swarm(
         sem = asyncio.Semaphore(min(MAX_PARALLEL_REVIEWERS, len(args.roles)))
         completed = 0
 
-        async def review_role(role: str) -> Dict[str, str]:
+        async def review_role(role: str) -> Dict[str, Any]:
             nonlocal completed
             async with sem:
+                ok = False
                 try:
                     output = await _call_llm(
                         candidates,
@@ -497,24 +498,49 @@ async def run_code_review_swarm(
                         # snapshots and 4 of 5 reviewers returned empty text.
                         max_tokens=9000,
                     )
-                    output = output.strip() or "(reviewer returned an empty response)"
+                    stripped = output.strip()
+                    if stripped:
+                        output, ok = stripped, True
+                    else:
+                        output = "(reviewer returned an empty response)"
                 except Exception as exc:
                     output = f"Reviewer failed: {type(exc).__name__}: {exc}"
                 completed += 1
                 await _emit(progress_cb, start, f"swarm: {role} reviewer complete ({completed}/{len(args.roles)})")
-                return {"role": role, "output": output}
+                return {"role": role, "output": output, "ok": ok}
 
         reviewer_outputs = await asyncio.gather(*(review_role(role) for role in args.roles))
+
+        # Graceful degradation: synthesize from the reviewers that produced
+        # substantive findings, not from empties/failures. A thinking model that
+        # burns its budget on hidden reasoning (or a flaky endpoint) can leave
+        # some reviewers blank; feeding those placeholders to synthesis dilutes
+        # the report. If EVERY reviewer came back blank, fail loudly instead of
+        # emitting an authoritative-looking but empty review.
+        substantive = [item for item in reviewer_outputs if item["ok"]]
+        failed_roles = [item["role"] for item in reviewer_outputs if not item["ok"]]
+        if not substantive:
+            detail = "; ".join(f"{item['role']}: {item['output'][:100]}" for item in reviewer_outputs)
+            return {
+                "error": (
+                    "run_code_review_swarm: every reviewer returned empty or failed, so no "
+                    "review was produced. With a thinking model this usually means the token "
+                    "budget was consumed by hidden reasoning — try a smaller snapshot_chars or "
+                    f"a non-thinking model. Reviewer details: {detail}"
+                ),
+                "exit_code": 1,
+            }
+
         await _emit(progress_cb, start, "swarm: synthesizing reviewer findings")
         try:
             final = await _call_llm(
                 candidates,
-                _synthesis_messages(args.goal, snapshot, reviewer_outputs),
+                _synthesis_messages(args.goal, snapshot, substantive),
                 max_tokens=10000,  # same thinking-model headroom as reviewers
             )
             final = final.strip()
         except Exception as exc:
-            joined = "\n\n".join(f"## {item['role']}\n{item['output']}" for item in reviewer_outputs)
+            joined = "\n\n".join(f"## {item['role']}\n{item['output']}" for item in substantive)
             final = (
                 "# Code Review Swarm\n\n"
                 f"Synthesis failed ({type(exc).__name__}: {exc}). Raw reviewer findings follow.\n\n"
@@ -522,13 +548,19 @@ async def run_code_review_swarm(
             )
 
         if not final:
-            final = "\n\n".join(f"## {item['role']}\n{item['output']}" for item in reviewer_outputs)
+            final = "\n\n".join(f"## {item['role']}\n{item['output']}" for item in substantive)
 
+        reviewer_line = f"- Reviewers: {', '.join(args.roles)}"
+        if failed_roles:
+            reviewer_line += (
+                f" ({len(substantive)}/{len(args.roles)} produced findings; "
+                f"no usable output from: {', '.join(failed_roles)})"
+            )
         header = (
             "# Code Review Swarm\n\n"
             f"- Root: `{snapshot.root}`\n"
             f"- Goal: {args.goal}\n"
-            f"- Reviewers: {', '.join(args.roles)}\n"
+            f"{reviewer_line}\n"
             f"- Model: {selected_model or 'configured utility/default'}\n"
             f"- Files seen: {snapshot.files_seen}; sampled: {len(snapshot.samples)}; "
             f"sensitive skipped: {snapshot.skipped_sensitive}; large skipped: {snapshot.skipped_large}\n\n"
@@ -542,6 +574,8 @@ async def run_code_review_swarm(
                 "goal": args.goal,
                 "agents": args.roles,
                 "agent_count": len(args.roles),
+                "reviewers_succeeded": len(substantive),
+                "reviewers_failed": failed_roles,
                 "model": selected_model,
                 "files_seen": snapshot.files_seen,
                 "files_sampled": len(snapshot.samples),
