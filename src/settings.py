@@ -147,6 +147,12 @@ DEFAULT_SETTINGS = {
     # so the agent knows its conventions and build/test/run commands. Injected
     # as untrusted content, capped in size. Set False to disable.
     "project_context_enabled": True,
+    # Built-in Browser MCP server (Playwright/Chromium via npx). OFF by default:
+    # it auto-launches a real Chromium child process on first use, which is
+    # surprising (a window can pop up) and carries the browser-automation attack
+    # surface. Flip to True only if you want the in-app agent to drive a browser
+    # itself. When False, register_builtin_servers skips connecting it entirely.
+    "builtin_browser_enabled": False,
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)
     # DRAFT skill to be injected into the agent prompt. Published skills always
     # qualify. Keeps low-confidence auto-skills out of context until they're

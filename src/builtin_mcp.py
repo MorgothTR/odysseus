@@ -86,6 +86,22 @@ _BUILTIN_NPX_SERVERS = {
 MCP_DISABLED = os.environ.get("ODYSSEUS_DISABLE_MCP", "").lower() in ("1", "true", "yes")
 
 
+def _browser_server_enabled() -> bool:
+    """Whether to auto-connect the built-in Browser (Playwright) MCP server.
+
+    OFF by default — it launches a Chromium child process and carries the
+    browser-automation surface, so it's opt-in via settings. Fails closed
+    (returns False) if settings can't be read, so we never auto-spawn a
+    browser on a misconfigured/partial install."""
+    try:
+        from src.settings import get_setting
+
+        return bool(get_setting("builtin_browser_enabled", False))
+    except Exception as e:
+        logger.warning(f"Could not read builtin_browser_enabled; defaulting OFF: {e}")
+        return False
+
+
 async def register_builtin_servers(mcp_manager):
     """Connect all built-in MCP servers to the manager."""
     if MCP_DISABLED:
@@ -129,6 +145,16 @@ async def register_builtin_servers(mcp_manager):
     async def _start_npx_servers():
         await asyncio.sleep(3)  # let Python servers finish first
         for server_id, cfg in _BUILTIN_NPX_SERVERS.items():
+            # The browser server is opt-in (default OFF): it spawns a real
+            # Chromium child on first use — a visible window unless headless,
+            # and the full browser-automation surface. Skip unless the user
+            # explicitly enabled it in settings.
+            if server_id == "builtin_browser" and not _browser_server_enabled():
+                logger.info(
+                    "Built-in Browser MCP server disabled (settings: "
+                    "builtin_browser_enabled=False) — skipping connect."
+                )
+                continue
             # Skip the server if its npx package isn't cached. Without this
             # check, npx would try to download/install the package on first
             # use, which can take minutes (or hang) on fresh installs without
