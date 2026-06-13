@@ -208,6 +208,12 @@ _TOOL_NAME_MAP = {
     "type_check": "check_code",
     "diagnostics": "check_code",
     "check_diagnostics": "check_code",
+    "semantic_code_search": "semantic_code_search",
+    "code_search": "semantic_code_search",
+    "search_code": "semantic_code_search",
+    "semantic_search": "semantic_code_search",
+    "find_code": "semantic_code_search",
+    "codesearch": "semantic_code_search",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

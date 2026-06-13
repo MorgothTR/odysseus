@@ -284,6 +284,12 @@ IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL 
 Run a static checker on a file or folder and get back errors (file:line) WITHOUT running the code — undefined names, unused imports, syntax errors (Python, via bundled ruff) and type errors (JS/TS, via the project's tsc). Use it to VERIFY your edits: after you edit_file/write_file source code, run check_code on the file (and run the project's tests if it has them). Don't report a code change as working until check_code comes back clean.
 IMPORTANT: check_code IS your tool for finding code errors. When you want to lint, type-check, or check a file for errors/bugs, CALL check_code — do NOT improvise with bash (pyflakes/pylint/py_compile/flake8/eslint/tsc), do NOT run the code just to surface a NameError, and do NOT spawn a sub-agent for it. check_code already runs the right checker (ruff for Python, tsc for JS/TS) and is the only one guaranteed to be installed. Read-only; confined to allowed folders.""",
 
+    "semantic_code_search": """\
+```semantic_code_search
+{"query": "<what you're looking for, in plain language>"}
+```
+Find code by MEANING across the workspace — describe the behaviour or concept ("where the retry/backoff logic lives", "how auth tokens are validated", "the function that loads settings") and get back the most relevant code as ranked file:line snippets, even when you don't know the exact name or file. It embeds the source into a vector index that stays fresh as files change. Use this when you'd have to GUESS the literal string for grep; use grep when you already KNOW the exact text/symbol. Optional "path" scopes to a sub-folder, "k" caps results. Read-only; confined to the workspace.""",
+
     "spawn_agent": """\
 ```spawn_agent
 {"goal": "<focused task>", "context": "<paths, constraints, what 'done' looks like>"}

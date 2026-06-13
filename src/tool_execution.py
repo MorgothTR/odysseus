@@ -1401,6 +1401,11 @@ async def execute_tool_block(
         first_line = content.split(chr(10))[0][:80]
         desc = f"check_code: {first_line}"
         result = await check_code(content, workspace=workspace, owner=owner)
+    elif tool == "semantic_code_search":
+        from src.code_search import semantic_code_search
+
+        desc = f"semantic_code_search: {content.split(chr(10))[0][:80]}"
+        result = await semantic_code_search(content, workspace=workspace, owner=owner)
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

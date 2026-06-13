@@ -183,6 +183,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "semantic_code_search",
+            "description": "Search the workspace's code by MEANING, not literal text — describe what you're looking for ('where auth tokens are validated', 'the retry/backoff logic', 'how settings are loaded') and get back the most relevant code as ranked file:line snippets. Embeds the source into a vector index (kept fresh as files change) and finds matches even when you don't know the exact identifier or filename. Use this when grep would need the exact string; use grep when you DO know the literal text. Read-only; confined to the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural-language description of the code you're looking for."},
+                    "path": {"type": "string", "description": "Optional sub-folder of the workspace to scope the search to (default: whole workspace)."},
+                    "k": {"type": "integer", "description": "Max results to return (default 8)."}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "spawn_agent",
             "description": "Delegate one or more focused tasks to sub-agents that each run in a fresh context with read-only tools (read_file/grep/glob/ls, optionally web_search/web_fetch) confined to the allowed folder, and return only their final summaries — keeping your own context lean. Children have no access to this conversation (put all needed detail in goal/context), are READ-ONLY, and cannot spawn their own sub-agents. Use for parallel research, multi-file audits, and investigate-and-report work. Not for writing files or running commands.",
             "parameters": {
@@ -1332,7 +1348,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code", "semantic_code_search"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
