@@ -63,18 +63,20 @@ def test_spawn_agent_aliases_and_structured_args():
 # ── Confinement (the depth limit) ────────────────────────────────────────────
 
 def test_child_toolset_is_confined_and_cannot_spawn():
-    # Default is read-only nav.
-    assert confine_child_toolset(None) == set(READONLY_TOOLSET)
-    # spawn_agent / bash / write are stripped no matter what is requested — this
-    # is the flat one-level depth guard: a child can't get the tool to recurse.
-    dangerous = confine_child_toolset({"spawn_agent", "bash", "write_file", "read_file", "grep"})
-    assert dangerous == {"read_file", "grep"}
+    nav = set(READONLY_TOOLSET)
+    # Default is the full read-only nav kit.
+    assert confine_child_toolset(None) == nav
+    # The nav kit is a FLOOR: a model requesting an odd subset still gets all of
+    # it (no losing grep), while spawn_agent/bash/write are never granted — the
+    # flat one-level depth guard plus read-only confinement.
+    dangerous = confine_child_toolset({"spawn_agent", "bash", "write_file", "read_file", "ls"})
+    assert dangerous == nav
     assert "spawn_agent" not in SAFE_CHILD_TOOLS
     assert "bash" not in SAFE_CHILD_TOOLS
-    # Web read tools are allowed for research children.
-    assert confine_child_toolset({"web_search"}) == {"web_search"}
-    # A fully-rejected request falls back to read-only nav, never empty.
-    assert confine_child_toolset({"bash", "spawn_agent"}) == set(READONLY_TOOLSET)
+    # Web read tools are the only opt-in addition on top of the nav floor.
+    assert confine_child_toolset({"web_search"}) == nav | {"web_search"}
+    # A request of only dangerous tools yields exactly the nav floor.
+    assert confine_child_toolset({"bash", "spawn_agent"}) == nav
 
 
 # ── Behaviour (driver mocked) ────────────────────────────────────────────────

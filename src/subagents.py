@@ -52,15 +52,19 @@ def _all_tool_names() -> Set[str]:
 
 
 def confine_child_toolset(requested: Optional[Set[str]]) -> Set[str]:
-    """Intersect a requested toolset with SAFE_CHILD_TOOLS; default to read-only.
+    """Resolve a child's toolset: always the full read-only nav kit, plus any
+    safe extras (web lookup) the caller asked for.
 
-    A child can never be granted a tool outside the safe set — not bash, not a
-    write tool, and not spawn_agent (so it cannot spawn grandchildren). An empty
-    or fully-rejected request falls back to the read-only navigation set."""
-    if not requested:
-        return set(READONLY_TOOLSET)
-    confined = {t for t in requested if t in SAFE_CHILD_TOOLS}
-    return confined or set(READONLY_TOOLSET)
+    The read-only navigation set (read_file/grep/glob/ls) is a FLOOR — a child
+    always gets all of it, so a model that requests an odd subset (e.g.
+    ["read_file", "bash", "ls"]) does not end up missing grep. The only opt-in
+    additions are the other SAFE_CHILD_TOOLS (web_search/web_fetch). A tool
+    outside the safe set — bash, a write tool, spawn_agent itself — can never be
+    granted, which is what keeps children read-only and one level deep."""
+    toolset = set(READONLY_TOOLSET)
+    if requested:
+        toolset |= {t for t in requested if t in SAFE_CHILD_TOOLS}
+    return toolset
 
 
 def resolve_subagent_candidates(model_spec: str, owner: Optional[str]) -> Tuple[List[Candidate], str]:
