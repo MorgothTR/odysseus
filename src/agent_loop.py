@@ -274,7 +274,7 @@ Find files by glob pattern under an allowed folder, newest first. Prefer this ov
 ```run_code_review_swarm
 {"path": "<allowed folder path>", "goal": "review code quality", "agent_count": 5}
 ```
-Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files. Optional: `"snapshot_chars": 150000` sends a much deeper code snapshot to every reviewer — worth it on big-context models when the user asks for a thorough review (it multiplies token cost by the reviewer count).
+Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files. Optional: `"snapshot_chars": 150000` sends a much deeper code snapshot to every reviewer — worth it on big-context models when the user asks for a thorough review (it multiplies token cost by the reviewer count). Optional: `"agentic": true` makes each reviewer a sub-agent that explores the repo with read-only tools instead of reading a fixed snapshot — deeper, evidence-grounded findings on larger repos; prefer it when the user asks for a deep/thorough investigation.
 IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL as your first action. Do NOT simulate the swarm yourself — no reading the files and hand-writing a "multi-agent style" review, no writing or running your own review script. The backend runs real parallel reviewers; your job is the single tool call.""",
 
     "manage_processes": """\

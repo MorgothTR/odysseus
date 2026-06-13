@@ -33,6 +33,12 @@ MAX_SNIPPET_CHARS_PER_FILE = 3_500
 MAX_SNIPPET_CHARS_CEILING = 24_000
 MAX_FINAL_REPORT_CHARS = 18_000
 
+# Agentic mode (phase 20A): each reviewer is a sub-agent that explores the repo
+# with read-only tools instead of reviewing a fixed snapshot. Round budget per
+# reviewer — enough to list the tree, grep its patterns, read suspect files, and
+# write findings, not enough to wander.
+AGENTIC_REVIEWER_ROUNDS = 6
+
 ProgressCallback = Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
 Candidate = Tuple[Optional[str], Optional[str], Optional[Dict[str, str]]]
 
@@ -99,6 +105,7 @@ class SwarmArgs:
     max_files: int
     snapshot_chars: int
     snippet_chars: int
+    agentic: bool
 
 
 @dataclass
@@ -187,9 +194,11 @@ def _parse_args(content: str) -> SwarmArgs:
     snippet_chars = _clamp_int(
         data.get("snippet_chars"), default_snippet, 1_000, MAX_SNIPPET_CHARS_CEILING
     )
+    agentic = bool(data.get("agentic", False))
     return SwarmArgs(
         path=path, goal=goal, roles=_select_roles(data), model=model,
         max_files=max_files, snapshot_chars=snapshot_chars, snippet_chars=snippet_chars,
+        agentic=agentic,
     )
 
 
@@ -323,6 +332,22 @@ def _render_snapshot(snapshot: Snapshot) -> str:
     return "\n".join(parts)
 
 
+def _render_file_tree(snapshot: Snapshot) -> str:
+    """Tree-only map (no file bodies) — the starter context an agentic reviewer
+    gets before it reads files itself."""
+    parts = [
+        f"Files seen: {snapshot.files_seen}",
+        "Extensions: " + json.dumps(snapshot.extension_counts, sort_keys=True),
+        "",
+        "File tree:",
+    ]
+    for rel in snapshot.files_listed:
+        parts.append(f"- {rel}")
+    if snapshot.files_seen > len(snapshot.files_listed):
+        parts.append(f"- ... {snapshot.files_seen - len(snapshot.files_listed)} more files")
+    return "\n".join(parts)
+
+
 def _role_focus(role: str) -> str:
     normalized = _normalize_role_name(role)
     if normalized in ROLE_FOCUS:
@@ -447,6 +472,61 @@ def _truncate_report(text: str) -> str:
     return text[:MAX_FINAL_REPORT_CHARS] + f"\n\n... [swarm report truncated at {MAX_FINAL_REPORT_CHARS} chars]"
 
 
+def _reviewer_system_prompt(role: str) -> str:
+    """System framing for an agentic reviewer — a sub-agent that explores the
+    repo with read-only tools rather than reviewing a fixed snapshot."""
+    return (
+        "You are one specialist reviewer in a read-only local code review swarm. "
+        f"Your specialist role: {role}. Focus on: {_role_focus(role)}.\n"
+        "You have READ-ONLY tools (read_file, grep, glob, ls) confined to the review root. "
+        "Investigate the real code: glob/ls to map it, grep for the patterns your role cares "
+        "about, and read the files you find suspicious. Ground every finding in code you "
+        "actually opened — cite relative file paths. Do not claim you ran commands you did not. "
+        "When done, return concise markdown: findings ordered by severity, each with the file "
+        "path, the evidence, and a suggested fix; then note test/verification gaps and the "
+        "limits of what you inspected."
+    )
+
+
+async def _run_reviewer_agent(
+    role: str,
+    goal: str,
+    root: str,
+    file_tree: str,
+    candidates: List[Candidate],
+    owner: Optional[str],
+) -> Dict[str, Any]:
+    """Run one reviewer as a confined read-only sub-agent. Returns the same
+    {role, output, ok} shape as the snapshot reviewer so synthesis is unchanged."""
+    from src.subagents import run_subagent, READONLY_TOOLSET
+
+    user_message = (
+        f"Review goal:\n{goal}\n\n"
+        f"You are reviewing the code under your accessible root for the '{role}' perspective. "
+        f"Here is the file tree to orient you — read the files you need:\n\n{file_tree}"
+    )
+    ok = False
+    try:
+        output = await run_subagent(
+            goal=user_message,
+            system_prompt=_reviewer_system_prompt(role),
+            candidate=candidates[0],
+            root=root,
+            toolset=set(READONLY_TOOLSET),
+            fallbacks=candidates[1:],
+            max_rounds=AGENTIC_REVIEWER_ROUNDS,
+            owner=owner,
+        )
+        stripped = (output or "").strip()
+        if stripped:
+            output, ok = stripped, True
+        else:
+            output = "(reviewer returned an empty response)"
+    except Exception as exc:
+        output = f"Reviewer failed: {type(exc).__name__}: {exc}"
+    return {"role": role, "output": output, "ok": ok}
+
+
 async def run_code_review_swarm(
     content: str,
     *,
@@ -474,40 +554,52 @@ async def run_code_review_swarm(
             }
 
         candidates, selected_model = _resolve_candidates(args.model, owner)
-        snapshot_text = _render_snapshot(snapshot)
+        # Snapshot mode renders the full snapshot (tree + file excerpts) into the
+        # prompt. Agentic mode renders only the tree as a starter map and lets
+        # each reviewer read files itself with read-only tools.
+        snapshot_text = "" if args.agentic else _render_snapshot(snapshot)
+        file_tree = _render_file_tree(snapshot) if args.agentic else ""
+        mode_label = "agentic reviewers (read-only tools)" if args.agentic else f"reviewers with {len(snapshot.samples)} sampled files"
         await _emit(
             progress_cb,
             start,
-            f"swarm: starting {len(args.roles)} reviewers with {len(snapshot.samples)} sampled files",
+            f"swarm: starting {len(args.roles)} {mode_label}",
         )
 
         sem = asyncio.Semaphore(min(MAX_PARALLEL_REVIEWERS, len(args.roles)))
         completed = 0
 
+        async def _snapshot_review(role: str) -> Dict[str, Any]:
+            ok = False
+            try:
+                output = await _call_llm(
+                    candidates,
+                    _review_messages(role, args.goal, snapshot_text),
+                    # Generous budget: thinking models (kimi-k2.6 etc.) spend
+                    # tokens on hidden reasoning FIRST — at 3000 the reasoning
+                    # consumed the whole budget over large snapshots and 4 of 5
+                    # reviewers returned empty text.
+                    max_tokens=9000,
+                )
+                stripped = output.strip()
+                if stripped:
+                    output, ok = stripped, True
+                else:
+                    output = "(reviewer returned an empty response)"
+            except Exception as exc:
+                output = f"Reviewer failed: {type(exc).__name__}: {exc}"
+            return {"role": role, "output": output, "ok": ok}
+
         async def review_role(role: str) -> Dict[str, Any]:
             nonlocal completed
             async with sem:
-                ok = False
-                try:
-                    output = await _call_llm(
-                        candidates,
-                        _review_messages(role, args.goal, snapshot_text),
-                        # Generous budget: thinking models (kimi-k2.6 etc.)
-                        # spend tokens on hidden reasoning FIRST — at 3000 the
-                        # reasoning consumed the whole budget over large
-                        # snapshots and 4 of 5 reviewers returned empty text.
-                        max_tokens=9000,
-                    )
-                    stripped = output.strip()
-                    if stripped:
-                        output, ok = stripped, True
-                    else:
-                        output = "(reviewer returned an empty response)"
-                except Exception as exc:
-                    output = f"Reviewer failed: {type(exc).__name__}: {exc}"
+                if args.agentic:
+                    result = await _run_reviewer_agent(role, args.goal, root, file_tree, candidates, owner)
+                else:
+                    result = await _snapshot_review(role)
                 completed += 1
                 await _emit(progress_cb, start, f"swarm: {role} reviewer complete ({completed}/{len(args.roles)})")
-                return {"role": role, "output": output, "ok": ok}
+                return result
 
         reviewer_outputs = await asyncio.gather(*(review_role(role) for role in args.roles))
 
@@ -556,14 +648,21 @@ async def run_code_review_swarm(
                 f" ({len(substantive)}/{len(args.roles)} produced findings; "
                 f"no usable output from: {', '.join(failed_roles)})"
             )
+        mode = "agentic (read-only tools)" if args.agentic else "snapshot"
+        files_line = (
+            f"- Files seen: {snapshot.files_seen}; reviewers explored the tree with read-only tools\n\n"
+            if args.agentic else
+            f"- Files seen: {snapshot.files_seen}; sampled: {len(snapshot.samples)}; "
+            f"sensitive skipped: {snapshot.skipped_sensitive}; large skipped: {snapshot.skipped_large}\n\n"
+        )
         header = (
             "# Code Review Swarm\n\n"
             f"- Root: `{snapshot.root}`\n"
             f"- Goal: {args.goal}\n"
+            f"- Mode: {mode}\n"
             f"{reviewer_line}\n"
             f"- Model: {selected_model or 'configured utility/default'}\n"
-            f"- Files seen: {snapshot.files_seen}; sampled: {len(snapshot.samples)}; "
-            f"sensitive skipped: {snapshot.skipped_sensitive}; large skipped: {snapshot.skipped_large}\n\n"
+            f"{files_line}"
         )
         report = _truncate_report(header + final)
         return {
@@ -572,6 +671,7 @@ async def run_code_review_swarm(
             "swarm": {
                 "root": snapshot.root,
                 "goal": args.goal,
+                "mode": "agentic" if args.agentic else "snapshot",
                 "agents": args.roles,
                 "agent_count": len(args.roles),
                 "reviewers_succeeded": len(substantive),

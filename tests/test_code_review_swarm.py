@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -132,6 +133,57 @@ async def test_swarm_synthesizes_from_surviving_reviewers(monkeypatch, tmp_path)
     # Synthesis only saw the survivors — no empty placeholders fed in.
     assert "security" not in synth_inputs["text"]
     assert "(reviewer returned an empty response)" not in synth_inputs["text"]
+
+
+@pytest.mark.asyncio
+async def test_agentic_mode_runs_subagent_reviewers(monkeypatch, tmp_path):
+    # agentic=true routes each reviewer through run_subagent (read-only tools)
+    # instead of the snapshot _call_llm path.
+    repo = tmp_path / "project"
+    repo.mkdir()
+    (repo / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+
+    subagent_calls = []
+
+    async def fake_run_subagent(*, goal, system_prompt, candidate, root, toolset, fallbacks, max_rounds, owner):
+        subagent_calls.append({"root": root, "toolset": set(toolset), "max_rounds": max_rounds})
+        role = "reviewer"
+        for line in system_prompt.splitlines():
+            if "specialist role:" in line.lower():
+                role = line.split(":", 1)[1].strip().rstrip(".")
+                break
+        return f"- {role}: investigated app.py and found a concrete issue."
+
+    async def fake_synth(_candidates, messages, *, max_tokens):
+        return "## Summary\nSynthesized agentic findings."
+
+    monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: [str(tmp_path)])
+    monkeypatch.setattr("src.code_review_swarm._resolve_candidates", lambda model, owner: ([("http://local/v1/chat/completions", "review-model", {})], "review-model"))
+    monkeypatch.setattr("src.subagents.run_subagent", fake_run_subagent)
+    # Only the synthesis goes through _call_llm in agentic mode.
+    monkeypatch.setattr("src.code_review_swarm._call_llm", fake_synth)
+
+    result = await run_code_review_swarm(
+        json.dumps({"path": str(repo), "agentic": True, "agent_count": 3}),
+        owner="admin",
+    )
+
+    assert result["exit_code"] == 0
+    assert result["swarm"]["mode"] == "agentic"
+    assert result["swarm"]["reviewers_succeeded"] == 3
+    assert "Mode: agentic" in result["output"]
+    # Each reviewer ran as a confined read-only sub-agent over the repo root.
+    assert len(subagent_calls) == 3
+    for call in subagent_calls:
+        assert call["toolset"] == {"read_file", "grep", "glob", "ls"}
+        assert os.path.realpath(call["root"]) == os.path.realpath(str(repo))
+
+
+def test_agentic_arg_parses():
+    from src.code_review_swarm import _parse_args
+
+    assert _parse_args(json.dumps({"path": "C:/x"})).agentic is False
+    assert _parse_args(json.dumps({"path": "C:/x", "agentic": True})).agentic is True
 
 
 @pytest.mark.asyncio

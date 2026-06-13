@@ -158,8 +158,9 @@ FUNCTION_TOOL_SCHEMAS = [
                         "items": {"type": "string"}
                     },
                     "model": {"type": "string", "description": "Optional model name or model@endpoint override; defaults to Utility/Default"},
-                    "snapshot_chars": {"type": "integer", "description": "Code snapshot budget in characters sent to EVERY reviewer (default 32000, max 300000). Raise for big-context models like kimi-k2.6; large values multiply token spend by the reviewer count"},
-                    "snippet_chars": {"type": "integer", "description": "Per-file excerpt cap in characters (default scales with snapshot_chars, max 24000)"}
+                    "snapshot_chars": {"type": "integer", "description": "Code snapshot budget in characters sent to EVERY reviewer (default 32000, max 300000). Raise for big-context models like kimi-k2.6; large values multiply token spend by the reviewer count. Ignored when agentic=true"},
+                    "snippet_chars": {"type": "integer", "description": "Per-file excerpt cap in characters (default scales with snapshot_chars, max 24000). Ignored when agentic=true"},
+                    "agentic": {"type": "boolean", "description": "When true, each reviewer is a sub-agent that explores the repo with read-only tools (grep/read_file/glob/ls) instead of reviewing a fixed snapshot — deeper, evidence-grounded findings on larger repos, at higher token cost. Default false (snapshot mode)"}
                 },
                 "required": ["path"]
             }

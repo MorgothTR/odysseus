@@ -189,12 +189,15 @@ tests.
 
 ## Sequencing
 
-1. **Pre-req (independent):** swarm graceful degradation — synthesize from
-   non-empty reviewers; never emit a broken report. Ships in the next build.
-2. **Phase A:** agentic reviewers behind a `mode`/`agentic` flag. A/B vs.
-   snapshot swarm. Promote to default if quality wins.
+1. **Pre-req (independent): DONE** (commit d55dcb6) — swarm graceful degradation:
+   synthesize from non-empty reviewers; error if all empty.
+2. **Phase A: DONE** — `src/subagents.py::run_subagent` (the reusable headless
+   driver) + agentic reviewers behind `"agentic": true` (default off). Each
+   reviewer is a confined read-only sub-agent (read_file/grep/glob/ls,
+   `workspace=root`, 6-round cap) that explores instead of reading a snapshot.
+   Still needs a LIVE run to A/B against snapshot mode before promoting to default.
 3. **Phase B v1:** `spawn_agent`, leaf-only, read-only default toolset, parallel
-   fan-out, registry, the nine hooks, tests.
+   fan-out, registry, the nine hooks, tests. Reuses `run_subagent` as its core.
 4. **Phase B v2:** orchestrator role (opt-in re-delegation), write-capable
    children behind admin gating, staleness/heartbeat monitor, a UI panel for
    the live sub-agent tree.
