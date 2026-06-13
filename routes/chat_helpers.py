@@ -829,8 +829,16 @@ def save_assistant_response(
     # into metadata.thinking so the thinking section re-renders on reload instead
     # of vanishing when the user navigates away and back. Stored in metadata only —
     # never folded into _content — so it stays out of the API resend path.
-    if reasoning and reasoning.strip() and not md.get("thinking"):
-        md["thinking"] = reasoning.strip()
+    if reasoning and reasoning.strip():
+        if not md.get("thinking"):
+            md["thinking"] = reasoning.strip()
+        # The reasoning lives in metadata now, so the content must carry NO think
+        # markup. Reasoning models occasionally leak a lone <think>/</think> at the
+        # reasoning->answer boundary into the content channel; left in place it
+        # corrupts the reload renderer, which wraps metadata.thinking in its OWN
+        # <think>...</think> — a second orphan tag breaks the parse so the thinking
+        # widget won't open and a literal </think> shows. Strip any strays.
+        _content = re.sub(r'</?think(?:ing)?[^>]*>', '', _content).strip()
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:
