@@ -190,7 +190,7 @@ FUNCTION_TOOL_SCHEMAS = [
                         }
                     },
                     "model": {"type": "string", "description": "Optional model override for the sub-agents; defaults to Utility/Default"},
-                    "max_rounds": {"type": "integer", "description": "Tool-loop budget per sub-agent (default 8, max 15)"}
+                    "max_rounds": {"type": "integer", "description": "Tool-loop budget per sub-agent (default 20, max 40); a thorough multi-file audit needs ~20"}
                 },
                 "required": []
             }

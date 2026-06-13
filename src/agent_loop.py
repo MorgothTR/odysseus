@@ -281,9 +281,9 @@ IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL 
 ```spawn_agent
 {"goal": "<focused task>", "context": "<paths, constraints, what 'done' looks like>"}
 ```
-Delegate a focused task to a sub-agent that runs in its OWN fresh context with read-only tools (read_file/grep/glob/ls, and optionally web_search/web_fetch) confined to the allowed folder, and return only its final summary — so your own context stays lean. The child has NO access to this conversation, so put everything it needs in `goal`/`context`. Run several in parallel by passing a list:
+Delegate a focused task to a sub-agent that runs in its OWN fresh context with read-only tools (read_file/grep/glob/ls, and optionally web_search/web_fetch) confined to the allowed folder, and return only its final summary — so your own context stays lean. The child has NO access to this conversation, so put everything it needs in `goal`/`context`. For MULTIPLE tasks, pass them all in ONE call's `tasks` array so they run in PARALLEL — do not make several separate spawn_agent calls (those run one after another):
 ```spawn_agent
-{"tasks": [{"goal": "audit auth.py for security issues"}, {"goal": "map how sessions flow through the codebase"}], "max_rounds": 8}
+{"tasks": [{"goal": "audit auth.py for security issues"}, {"goal": "map how sessions flow through the codebase"}]}
 ```
 Use for investigate-and-report work you want done without filling your context: parallel research, multi-file audits, "go figure out X and summarize." Children are READ-ONLY and cannot spawn their own sub-agents. Not for writing files or running commands — do those yourself.
 IMPORTANT: when the user asks you to spawn/delegate to sub-agents, actually CALL this tool — do NOT do the investigation yourself with read_file/bash/python and present it as if sub-agents did it. The whole point is that the children burn their own context, not yours.""",

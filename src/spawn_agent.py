@@ -35,8 +35,12 @@ from src.subagents import (
 # Config-authoritative caps — a model-supplied value never raises these.
 MAX_CONCURRENT_CHILDREN = 3
 MAX_SPAWN_TASKS = 6
-DEFAULT_SPAWN_ROUNDS = 10
-MAX_SPAWN_ROUNDS = 15
+# Sized from a hermes-agent reference run on the same task: thorough audit
+# sub-agents naturally finished in ~19-27 rounds (reading 7-10 files), never
+# hitting a cap. A tight budget truncates the work mid-audit, so the default is
+# generous (children stop when done) and the ceiling is a runaway backstop.
+DEFAULT_SPAWN_ROUNDS = 20
+MAX_SPAWN_ROUNDS = 40
 
 _SYSTEM_PROMPT = (
     "You are a sub-agent delegated a single focused task by a parent agent. You "

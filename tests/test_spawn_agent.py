@@ -139,6 +139,16 @@ def test_spawn_agent_requires_a_goal(monkeypatch):
     assert "goal" in result["error"]
 
 
+def test_spawn_agent_round_budget_clamps(monkeypatch):
+    from src.spawn_agent import DEFAULT_SPAWN_ROUNDS, MAX_SPAWN_ROUNDS, _clamp_rounds
+
+    assert _clamp_rounds(None) == DEFAULT_SPAWN_ROUNDS
+    assert _clamp_rounds(5) == 5
+    assert _clamp_rounds(9999) == MAX_SPAWN_ROUNDS  # runaway backstop
+    assert _clamp_rounds(0) == 1                     # floor
+    assert DEFAULT_SPAWN_ROUNDS >= 18                # room for a thorough audit
+
+
 def test_spawn_agent_caps_task_count(monkeypatch):
     _patch_candidates(monkeypatch)
     tasks = [{"goal": f"task {i}"} for i in range(MAX_SPAWN_TASKS + 2)]
