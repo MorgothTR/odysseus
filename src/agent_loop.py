@@ -281,7 +281,8 @@ IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL 
 ```check_code
 {"path": "<file or folder>"}
 ```
-Run a static checker on a file or folder and get back errors (file:line) WITHOUT running the code — undefined names, unused imports, syntax errors (Python, via bundled ruff) and type errors (JS/TS, via the project's tsc). Use it to VERIFY your edits: after you edit_file/write_file source code, run check_code on the file (and run the project's tests if it has them). Don't report a code change as working until check_code comes back clean. Read-only; confined to allowed folders.""",
+Run a static checker on a file or folder and get back errors (file:line) WITHOUT running the code — undefined names, unused imports, syntax errors (Python, via bundled ruff) and type errors (JS/TS, via the project's tsc). Use it to VERIFY your edits: after you edit_file/write_file source code, run check_code on the file (and run the project's tests if it has them). Don't report a code change as working until check_code comes back clean.
+IMPORTANT: check_code IS your tool for finding code errors. When you want to lint, type-check, or check a file for errors/bugs, CALL check_code — do NOT improvise with bash (pyflakes/pylint/py_compile/flake8/eslint/tsc), do NOT run the code just to surface a NameError, and do NOT spawn a sub-agent for it. check_code already runs the right checker (ruff for Python, tsc for JS/TS) and is the only one guaranteed to be installed. Read-only; confined to allowed folders.""",
 
     "spawn_agent": """\
 ```spawn_agent
