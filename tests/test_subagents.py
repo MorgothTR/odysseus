@@ -38,6 +38,22 @@ async def test_run_subagent_collects_text_and_confines_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_subagent_excludes_thinking_from_answer(monkeypatch):
+    # Thinking-model reasoning must not leak into the returned summary — only
+    # the real (non-thinking) answer deltas count.
+    async def fake_stream(**kwargs):
+        yield 'data: {"delta": "The user wants me to audit...", "thinking": true}\n\n'
+        yield 'data: {"delta": "let me read the file...", "thinking": true}\n\n'
+        yield 'data: {"delta": "## Findings\\n- bug on line 42"}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr("src.agent_loop.stream_agent_loop", fake_stream)
+    result = await run_subagent(goal="g", system_prompt="s", candidate=("u", "m", {}))
+    assert result == "## Findings\n- bug on line 42"
+    assert "The user wants me to" not in result
+
+
+@pytest.mark.asyncio
 async def test_run_subagent_grace_summarizes_when_no_final_text(monkeypatch):
     async def fake_stream(**kwargs):
         # Only tool output, model never wrote a final answer (ran out of rounds).

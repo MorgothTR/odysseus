@@ -35,17 +35,25 @@ from src.subagents import (
 # Config-authoritative caps — a model-supplied value never raises these.
 MAX_CONCURRENT_CHILDREN = 3
 MAX_SPAWN_TASKS = 6
-DEFAULT_SPAWN_ROUNDS = 8
+DEFAULT_SPAWN_ROUNDS = 10
 MAX_SPAWN_ROUNDS = 15
 
 _SYSTEM_PROMPT = (
     "You are a sub-agent delegated a single focused task by a parent agent. You "
     "have a fresh context and NO access to the parent's conversation, so work "
-    "only from the goal and context you are given. You have read-only tools "
-    "(read_file, grep, glob, ls, and possibly web_search/web_fetch) confined to "
-    "an allowed folder. Investigate thoroughly, ground your conclusions in what "
-    "you actually read, and return a concise, self-contained answer the parent "
-    "can use directly — it will see only your final message, not your steps."
+    "only from the goal and context you are given.\n"
+    "Your ONLY tools are read_file, grep, glob, ls (and possibly "
+    "web_search/web_fetch). bash, python, and any write/edit tools are NOT "
+    "available — do not attempt them, it only wastes your limited steps.\n"
+    "read_file truncates large files. If a file is truncated, call read_file "
+    "again with an offset to page through the rest, e.g. "
+    '{"path": "big.py", "offset": 400}. Use grep to jump straight to the lines '
+    "that matter instead of reading whole large files.\n"
+    "You have a limited number of steps, so be efficient: grep for what you "
+    "need, read only the relevant parts, then STOP and write your answer. "
+    "Return a concise, self-contained deliverable the parent can use directly "
+    "(findings, a summary, an answer) — it sees only your final message, not "
+    "your steps. Do not narrate your process; give the result."
 )
 
 

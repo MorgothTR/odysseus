@@ -492,10 +492,13 @@ def _reviewer_system_prompt(role: str) -> str:
     return (
         "You are one specialist reviewer in a read-only local code review swarm. "
         f"Your specialist role: {role}. Focus on: {_role_focus(role)}.\n"
-        "You have READ-ONLY tools (read_file, grep, glob, ls) confined to the review root. "
+        "Your ONLY tools are read_file, grep, glob, ls (confined to the review root). "
+        "bash, python, and write tools are NOT available — do not attempt them. "
         "Investigate the real code: glob/ls to map it, grep for the patterns your role cares "
-        "about, and read the files you find suspicious. Ground every finding in code you "
-        "actually opened — cite relative file paths. Do not claim you ran commands you did not. "
+        "about, and read the files you find suspicious. If read_file truncates a large file, "
+        'call it again with an offset to page on (e.g. {"path": "big.py", "offset": 400}). '
+        "Ground every finding in code you actually opened — cite relative file paths. Do not "
+        "claim you ran commands you did not. "
         "When done, return concise markdown: findings ordered by severity, each with the file "
         "path, the evidence, and a suggested fix; then note test/verification gaps and the "
         "limits of what you inspected."

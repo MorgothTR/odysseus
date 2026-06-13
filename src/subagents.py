@@ -168,7 +168,13 @@ async def run_subagent(
                 data = json.loads(event_str[6:])
             except (json.JSONDecodeError, ValueError):
                 continue
-            if "delta" in data:
+            # Capture the ANSWER, not the reasoning. Thinking models stream
+            # their chain-of-thought as delta events flagged thinking=true; if
+            # we kept those, the "summary" returned to the parent would be raw
+            # reasoning ("The user wants me to…"), not the deliverable. Skip
+            # them — if the child only thought and never wrote a final answer,
+            # the grace summary below produces a clean one.
+            if "delta" in data and not data.get("thinking"):
                 full_text += data["delta"]
             elif data.get("type") == "tool_output":
                 summary = data.get("stdout") or data.get("output") or data.get("result") or ""
