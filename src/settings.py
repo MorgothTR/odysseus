@@ -101,7 +101,12 @@ DEFAULT_SETTINGS = {
     "research_run_timeout_seconds": 1800,
     "agent_max_tool_calls": 0,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
-    "agent_input_token_budget": 6000,
+    # Soft input-token budget. Only a FALLBACK for models whose context window
+    # can't be discovered — when the window IS known and this isn't explicitly
+    # overridden, compute_input_token_budget scales to 85% of it (see #1170). Was
+    # 6000, which truncated the ~12K-token tool catalog out of the system prompt
+    # on large-context models, so the agent "couldn't see" most of its tools.
+    "agent_input_token_budget": 32000,
     # Ceiling on the *auto-derived* input budget that #1230 introduced. Has
     # no effect when `agent_input_token_budget` is explicitly set (the user's
     # value is honoured regardless). Default matches
@@ -228,9 +233,23 @@ def load_settings() -> dict:
 
 
 def save_settings(settings: dict):
-    """Persist settings to disk (atomic; see core.atomic_io)."""
+    """Persist settings to disk (atomic; see core.atomic_io).
+
+    Only values that DIFFER from DEFAULT_SETTINGS are written. Callers pass the
+    full merged dict (defaults + user changes), and persisting every default as
+    an explicit key makes is_setting_overridden() return True for settings the
+    user never touched — which silently disables default-aware behaviour like the
+    adaptive input-token budget (a 128K-context model got capped at the 6000
+    default because the materialised key looked like an explicit choice). Keys not
+    in DEFAULT_SETTINGS (ad-hoc/runtime) are always kept. load_settings() re-merges
+    with defaults, so the in-memory view stays complete either way.
+    """
     from core.atomic_io import atomic_write_json
-    atomic_write_json(SETTINGS_FILE, settings, indent=2)
+    to_save = {
+        k: v for k, v in settings.items()
+        if k not in DEFAULT_SETTINGS or v != DEFAULT_SETTINGS[k]
+    }
+    atomic_write_json(SETTINGS_FILE, to_save, indent=2)
     _invalidate_caches()
 
 

@@ -5,7 +5,7 @@ Pins the pure budget computation and the explicit-override detection.
 
 import json
 
-from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX
+from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, DEFAULT_BUDGET
 
 
 def test_default_scales_to_context_window():
@@ -30,7 +30,41 @@ def test_explicit_budget_clamped_to_window():
 
 def test_unknown_window_falls_back_to_configured():
     assert compute_input_token_budget(6000, 0, explicit=False) == 6000
-    assert compute_input_token_budget(0, 0, explicit=False) == 6000  # default
+    assert compute_input_token_budget(0, 0, explicit=False) == DEFAULT_BUDGET  # default
+
+
+def test_default_budget_fits_the_tool_catalogue():
+    # The assembled system prompt (all tool definitions) is ~12K tokens. The
+    # fallback budget MUST exceed that or trim_for_context truncates the prompt
+    # and the agent loses sight of most of its tools (the all-session bug).
+    assert DEFAULT_BUDGET >= 16000
+
+
+def test_save_settings_strips_default_valued_keys(tmp_path, monkeypatch):
+    # Materialising defaults into settings.json made is_setting_overridden() True
+    # for untouched keys, which disabled the adaptive budget. save_settings must
+    # persist only values that differ from the defaults.
+    import src.settings as settings
+
+    f = tmp_path / "settings.json"
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(f))
+    monkeypatch.setattr(settings, "_settings_cache", None)
+
+    default_budget = settings.DEFAULT_SETTINGS["agent_input_token_budget"]
+    settings.save_settings({
+        **settings.DEFAULT_SETTINGS,                 # every default, materialised by the UI
+        "agent_input_token_budget": default_budget,  # untouched (equals default)
+        "agent_max_rounds": 99,                      # a real user override
+        "some_runtime_key": "keep-me",               # not a known default
+    })
+
+    raw = json.loads(f.read_text(encoding="utf-8"))
+    # Untouched default must NOT be persisted -> not "overridden" -> adaptive budget stays on.
+    assert "agent_input_token_budget" not in raw
+    assert settings.is_setting_overridden("agent_input_token_budget") is False
+    # Genuine override and unknown keys survive.
+    assert raw["agent_max_rounds"] == 99
+    assert raw["some_runtime_key"] == "keep-me"
 
 
 def test_is_setting_overridden_reads_raw_saved_file(tmp_path, monkeypatch):
