@@ -671,7 +671,12 @@ async def run_code_review_swarm(
         if not final:
             final = "\n\n".join(f"## {item['role']}\n{item['output']}" for item in substantive)
 
-        reviewer_line = f"- Reviewers: {', '.join(args.roles)}"
+        # Fold the model into the reviewer line so the driving model can't
+        # report the reviewers without also reporting what they ran on — a weak
+        # model (deepseek-v4-flash) confabulated "Claude Sonnet 4" when the model
+        # sat on its own separate header line.
+        _model_label = selected_model or "configured utility/default"
+        reviewer_line = f"- Reviewers: {', '.join(args.roles)} — all running on model: {_model_label}"
         if failed_roles:
             reviewer_line += (
                 f" ({len(substantive)}/{len(args.roles)} produced findings; "
@@ -691,7 +696,6 @@ async def run_code_review_swarm(
             f"- Goal: {args.goal}\n"
             f"- Mode: {mode}\n"
             f"{reviewer_line}\n"
-            f"- Model: {selected_model or 'configured utility/default'}\n"
             f"{files_line}"
         )
         report = _truncate_report(header + final)

@@ -40,6 +40,10 @@ async def test_code_review_swarm_defaults_to_five_read_only_reviewers(monkeypatc
     assert result["swarm"]["agent_count"] == 5
     assert result["swarm"]["read_only"] is True
     assert "Code Review Swarm" in result["output"]
+    # The model is folded into the reviewer line (not a separate header line)
+    # so the driving model can't report the reviewers without their model.
+    assert "Reviewers:" in result["output"]
+    assert "all running on model: review-model" in result["output"]
     assert before == after
 
 
