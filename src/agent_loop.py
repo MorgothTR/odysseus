@@ -698,6 +698,7 @@ def _build_system_prompt(
     compact: bool = False,
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
+    workspace: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -1049,6 +1050,20 @@ def _build_system_prompt(
         except Exception as _sk_err:
             logger.debug(f"skill injection failed (non-fatal): {_sk_err}")
 
+    # Phase 19: the attached project's own guidance file (AGENTS.md / CLAUDE.md /
+    # .odysseus.md). User-editable project data, so it ships as untrusted context
+    # next to the user's request — same treatment as the skills/document blocks,
+    # never the trusted system role.
+    _project_context_message = None
+    if workspace and not suppress_local_context and get_setting("project_context_enabled", True):
+        try:
+            from src.project_context import load_project_context
+            _pc = load_project_context(workspace)
+            if _pc:
+                _project_context_message = untrusted_context_message("project guidance", _pc)
+        except Exception as _pc_err:
+            logger.debug(f"project context injection failed (non-fatal): {_pc_err}")
+
     agent_msg = {"role": "system", "content": agent_prompt}
     insert_idx = 0
     for i, msg in enumerate(messages):
@@ -1087,6 +1102,8 @@ def _build_system_prompt(
         last_user_idx += 1  # the document message is now at last_user_idx
     if _skills_message:
         merged.insert(last_user_idx, _skills_message)
+    if _project_context_message:
+        merged.insert(last_user_idx, _project_context_message)
 
     return merged, mcp_schemas
 
@@ -1762,6 +1779,7 @@ async def stream_agent_loop(
         compact=_is_api_model,
         owner=owner,
         suppress_local_context=guide_only,
+        workspace=workspace,
     )
     if workspace and not guide_only:
         # PREPEND (not append) so it dominates the large base prompt — appended

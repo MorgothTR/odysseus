@@ -142,6 +142,11 @@ DEFAULT_SETTINGS = {
     # a bad call is killed instead of grinding to the round cap. 0 disables it
     # (rely on the round cap alone).
     "subagent_timeout_seconds": 600,
+    # Phase 19: when a chat has a workspace folder attached, inject that
+    # project's guidance file (.odysseus.md / AGENTS.md / CLAUDE.md at the root)
+    # so the agent knows its conventions and build/test/run commands. Injected
+    # as untrusted content, capped in size. Set False to disable.
+    "project_context_enabled": True,
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)
     # DRAFT skill to be injected into the agent prompt. Published skills always
     # qualify. Keeps low-confidence auto-skills out of context until they're
