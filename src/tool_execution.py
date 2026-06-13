@@ -1395,6 +1395,12 @@ async def execute_tool_block(
             session_id=session_id,
             workspace=workspace,
         )
+    elif tool == "check_code":
+        from src.code_check import check_code
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"check_code: {first_line}"
+        result = await check_code(content, workspace=workspace, owner=owner)
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

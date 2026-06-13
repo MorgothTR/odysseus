@@ -169,6 +169,20 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "check_code",
+            "description": "Run a static checker on a file or folder and return structured errors (file:line) WITHOUT running the code — catches undefined names, unused imports, syntax errors, and type errors. Python uses bundled ruff; JS/TS uses the project's own tsc. Use it to verify your edits before reporting done (alongside the project's tests). Confined to the workspace; read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File or folder to check (a .py file, a JS/TS project dir, etc.)"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "spawn_agent",
             "description": "Delegate one or more focused tasks to sub-agents that each run in a fresh context with read-only tools (read_file/grep/glob/ls, optionally web_search/web_fetch) confined to the allowed folder, and return only their final summaries — keeping your own context lean. Children have no access to this conversation (put all needed detail in goal/context), are READ-ONLY, and cannot spawn their own sub-agents. Use for parallel research, multi-file audits, and investigate-and-report work. Not for writing files or running commands.",
             "parameters": {
@@ -1318,7 +1332,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")

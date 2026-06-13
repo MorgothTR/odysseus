@@ -201,6 +201,13 @@ _TOOL_NAME_MAP = {
     "delegate_task": "spawn_agent",
     "subagent": "spawn_agent",
     "sub_agent": "spawn_agent",
+    "check_code": "check_code",
+    "checkcode": "check_code",
+    "lint": "check_code",
+    "typecheck": "check_code",
+    "type_check": "check_code",
+    "diagnostics": "check_code",
+    "check_diagnostics": "check_code",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

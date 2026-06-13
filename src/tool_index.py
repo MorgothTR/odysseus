@@ -101,6 +101,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "run_code_review_swarm": "Run a read-only local code review swarm over an allowed folder. Uses 5 specialist reviewers by default (max 10), then synthesizes findings. Use for multi-agent reviews, swarm audits, code quality reviews, security/test/performance review, and repo audits. Confined to allowed local folders; does not write files.",
     "manage_processes": "Start, list, read logs of, or stop long-running background services: dev servers (npm run dev, vite, flask, uvicorn), file watchers, emulators. Services keep running between turns; the agent is notified if one crashes. Use for 'start the dev server', 'is the server running', 'show the server logs', 'stop the server'.",
     "spawn_agent": "Delegate focused tasks to read-only sub-agents that each run in a fresh context and return only a summary, keeping your context lean. Run several in parallel. Use for 'investigate X and report back', parallel multi-file audits, research fan-out, 'have a sub-agent figure out Y'. Children are read-only and cannot spawn more sub-agents.",
+    "check_code": "Run a static checker (lint/type-check) on a file or folder and return structured errors without running the code: undefined names, unused imports, syntax errors (Python via bundled ruff), and type errors (JS/TS via the project's tsc). Use to verify edits, find bugs, 'check for errors', 'lint this', 'are there type errors', or before reporting an edit done.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
@@ -488,6 +489,15 @@ class ToolIndex:
                    "audit the repo", "audit repository", "review repository",
                    "review this repo", "review this codebase"}):
             {"run_code_review_swarm", "grep", "glob", "ls", "read_file"},
+        # Code diagnostics — "check for errors", "lint", "type-check", "any
+        # bugs", "did my edit break anything". Distinct from run_tests (the
+        # project's own tests) — this is static analysis without running code.
+        frozenset({"check_code", "check for errors", "check the code", "lint",
+                   "lint this", "type check", "type-check", "typecheck",
+                   "any errors", "are there errors", "any bugs", "find bugs",
+                   "syntax errors", "type errors", "diagnostics", "ruff",
+                   "tsc", "static analysis", "did i break"}):
+            {"check_code"},
         # Sub-agent delegation — "spawn two sub-agents", "have an agent
         # investigate", "delegate this", "in parallel". Distinct from the review
         # swarm (code-review-specific) — this is general task delegation.

@@ -41,5 +41,9 @@ mcp
 pyotp
 qrcode[pil]
 croniter
+# Static code diagnostics for the check_code tool (src/code_check.py). A single
+# self-contained binary wheel, zero-config — gives the agent Python error
+# detection (undefined names, unused imports, syntax) without running the code.
+ruff
 pytest
 pytest-asyncio

@@ -277,6 +277,12 @@ Find files by glob pattern under an allowed folder, newest first. Prefer this ov
 Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files. Optional: `"snapshot_chars": 150000` sends a much deeper code snapshot to every reviewer — worth it on big-context models when the user asks for a thorough review (it multiplies token cost by the reviewer count). Optional: `"agentic": true` makes each reviewer a sub-agent that explores the repo with read-only tools instead of reading a fixed snapshot — deeper, evidence-grounded findings on larger repos; prefer it when the user asks for a deep/thorough investigation.
 IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL as your first action. Do NOT simulate the swarm yourself — no reading the files and hand-writing a "multi-agent style" review, no writing or running your own review script. The backend runs real parallel reviewers; your job is the single tool call.""",
 
+    "check_code": """\
+```check_code
+{"path": "<file or folder>"}
+```
+Run a static checker on a file or folder and get back errors (file:line) WITHOUT running the code — undefined names, unused imports, syntax errors (Python, via bundled ruff) and type errors (JS/TS, via the project's tsc). Use it to VERIFY your edits: after you edit_file/write_file source code, run check_code on the file (and run the project's tests if it has them). Don't report a code change as working until check_code comes back clean. Read-only; confined to allowed folders.""",
+
     "spawn_agent": """\
 ```spawn_agent
 {"goal": "<focused task>", "context": "<paths, constraints, what 'done' looks like>"}
