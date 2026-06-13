@@ -24,6 +24,7 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "manage_processes",
     "spawn_agent",
     "check_code",
+    "semantic_code_search",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -74,6 +75,9 @@ PLAN_MODE_READONLY_TOOLS = {
     # Runs a linter/type-checker — a subprocess, but strictly read-only (never
     # edits), so it's a legitimate plan-mode inspection tool.
     "check_code",
+    # Read-only semantic search over the workspace's code (no edits) — safe for
+    # plan-mode investigation.
+    "semantic_code_search",
     "web_search",
     "web_fetch",
     "search_chats",

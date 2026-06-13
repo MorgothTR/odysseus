@@ -33,6 +33,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "manage_processes",
              "spawn_agent",
              "check_code",
+             "semantic_code_search",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",
