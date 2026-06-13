@@ -179,6 +179,28 @@ async def test_agentic_mode_runs_subagent_reviewers(monkeypatch, tmp_path):
         assert os.path.realpath(call["root"]) == os.path.realpath(str(repo))
 
 
+def test_tree_only_snapshot_skips_file_bodies():
+    # Agentic mode collects the tree but no file bodies (reviewers read files
+    # themselves), so samples stays empty while the tree is still populated.
+    from src.code_review_swarm import _collect_snapshot
+    import tempfile
+    import os as _os
+
+    repo = tempfile.mkdtemp()
+    with open(_os.path.join(repo, "a.py"), "w", encoding="utf-8") as f:
+        f.write("x = 1\n" * 100)
+    with open(_os.path.join(repo, "b.py"), "w", encoding="utf-8") as f:
+        f.write("y = 2\n" * 100)
+
+    full = _collect_snapshot(repo)
+    tree = _collect_snapshot(repo, tree_only=True)
+
+    assert len(full.samples) >= 1
+    assert tree.samples == []           # no bodies read
+    assert tree.files_listed            # tree still populated
+    assert tree.files_seen == full.files_seen
+
+
 def test_agentic_arg_parses_with_aliases():
     from src.code_review_swarm import _parse_args
 

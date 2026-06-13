@@ -263,6 +263,7 @@ def _collect_snapshot(
     max_files: int = MAX_REVIEW_FILES,
     snapshot_chars: int = MAX_SNAPSHOT_CHARS,
     snippet_chars: int = MAX_SNIPPET_CHARS_PER_FILE,
+    tree_only: bool = False,
 ) -> Snapshot:
     root_real = os.path.realpath(root)
     all_files: List[Tuple[str, str, int]] = []
@@ -290,7 +291,10 @@ def _collect_snapshot(
 
     samples: List[FileSample] = []
     budget = snapshot_chars
-    for path, rel, size in all_files:
+    # Agentic reviewers read files themselves with read-only tools, so reading
+    # file bodies here is wasted work — collect the tree/metadata only.
+    sample_iter = [] if tree_only else all_files
+    for path, rel, size in sample_iter:
         if len(samples) >= max_files or budget <= 0:
             break
         if size > MAX_FILE_BYTES or not _should_sample_file(path):
@@ -556,8 +560,12 @@ async def run_code_review_swarm(
             max_files=args.max_files,
             snapshot_chars=args.snapshot_chars,
             snippet_chars=args.snippet_chars,
+            tree_only=args.agentic,
         )
-        if not snapshot.samples:
+        # Agentic reviewers explore the tree themselves, so files_listed is the
+        # signal there; snapshot reviewers need actual sampled file bodies.
+        has_reviewable = bool(snapshot.files_listed) if args.agentic else bool(snapshot.samples)
+        if not has_reviewable:
             return {
                 "error": "run_code_review_swarm: no reviewable text/code files found under the allowed folder",
                 "exit_code": 1,
@@ -660,7 +668,8 @@ async def run_code_review_swarm(
             )
         mode = "agentic (read-only tools)" if args.agentic else "snapshot"
         files_line = (
-            f"- Files seen: {snapshot.files_seen}; reviewers explored the tree with read-only tools\n\n"
+            f"- Files seen: {snapshot.files_seen}; reviewers read files directly with "
+            f"read-only tools (no size cap, nothing skipped for being large)\n\n"
             if args.agentic else
             f"- Files seen: {snapshot.files_seen}; sampled: {len(snapshot.samples)}; "
             f"sensitive skipped: {snapshot.skipped_sensitive}; large skipped: {snapshot.skipped_large}\n\n"
@@ -688,7 +697,10 @@ async def run_code_review_swarm(
                 "reviewers_failed": failed_roles,
                 "model": selected_model,
                 "files_seen": snapshot.files_seen,
-                "files_sampled": len(snapshot.samples),
+                # In agentic mode reviewers read files directly; "sampled" is a
+                # snapshot-mode concept, so report it as the count actually used.
+                "files_sampled": len(snapshot.files_listed) if args.agentic else len(snapshot.samples),
+                "large_files_skipped": 0 if args.agentic else snapshot.skipped_large,
                 "sensitive_files_skipped": snapshot.skipped_sensitive,
                 "duration_s": round(time.time() - start, 2),
                 "read_only": True,
