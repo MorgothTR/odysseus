@@ -305,7 +305,10 @@ export function extractThinkingBlocks(text) {
  * Create a collapsible thinking section
  */
 function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) {
-  const id = `thinking-${Date.now()}-${index}`;
+  // Unique id even when several sections render in the same millisecond with the
+  // same index (e.g. per-round agent thinking). Date.now()+index alone collided,
+  // so the delegated toggle opened the FIRST matching block, not the clicked one.
+  const id = `thinking-${Date.now()}-${index}-${(createThinkingSection._seq = (createThinkingSection._seq || 0) + 1)}`;
   const timeHtml = thinkingTime ? `<span style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;">${thinkingTime}s</span>` : '';
   return `
     <div class="thinking-section">
