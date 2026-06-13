@@ -2256,12 +2256,18 @@ async def stream_agent_loop(
                 if _synth:
                     yield f'data: {json.dumps({"delta": _synth})}\n\n'
                     full_response += _synth
+                    # Also feed the round so this lands in round_texts below — else
+                    # the synthesized FINAL ANSWER is in content but invisible to the
+                    # agent-reload renderer (which shows round_texts), so it vanishes
+                    # when the user navigates away and back.
+                    round_response += _synth
                 else:
                     _fb = ("I gathered some search results but couldn't pull a clean "
                            "answer together. Want me to try a more specific question, "
                            "or summarize what I did find?")
                     yield f'data: {json.dumps({"delta": _fb})}\n\n'
                     full_response += _fb
+                    round_response += _fb
 
         # ── Fallback: auto-create document if model dumped large code in chat ──
         # If no create_document tool was used, check for big code blocks in text
