@@ -2114,15 +2114,16 @@ export function addMessage(role, content, modelName, metadata) {
         }
       }
 
-      // Belt-and-suspenders: the message `text` (content) is the authoritative full
-      // answer. If a final answer landed in content but NOT in round_texts (e.g. the
+      // Belt-and-suspenders: the message `content` is the authoritative full answer.
+      // If a final answer landed in content but NOT in round_texts (e.g. the
       // grace-synthesis path appends to full_response only), the loop above never
       // rendered it — the actual answer would be invisible on reload. Recover the
       // uncovered tail of content and render it as a final bubble. No-op when
-      // round_texts already covers the content (the normal case).
+      // round_texts already covers the content (the normal case). NOTE: use the
+      // `content` param — `text` isn't declared until the standard path below (TDZ here).
       try {
         const _joined = roundTexts.map(t => (t || '').trim()).filter(Boolean);
-        const _full = (text || '').trim();
+        const _full = (content || '').trim();
         if (_full) {
           let _tail = '';
           if (!_joined.length) {
