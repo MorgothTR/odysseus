@@ -22,6 +22,7 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "ls",
     "run_code_review_swarm",
     "manage_processes",
+    "spawn_agent",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -118,6 +119,10 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     # Spawns/kills detached processes — a mutator even though list/logs are
     # read-only; the tool gate is per-tool, not per-action.
     "manage_processes",
+    # Spawns sub-agents that run their own tool loops — not a read-only
+    # inspection, so blocked in plan mode (children are read-only, but the
+    # act of spawning is a side effect).
+    "spawn_agent",
 }
 
 

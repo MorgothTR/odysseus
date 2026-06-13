@@ -277,6 +277,16 @@ Find files by glob pattern under an allowed folder, newest first. Prefer this ov
 Run a read-only local code review swarm over an allowed folder. Default is 5 specialist reviewers; the maximum is 10. Use this when the user asks for an agent swarm, multi-agent review, parallel audit, code quality review, or repo audit. It does not edit files. Optional: `"snapshot_chars": 150000` sends a much deeper code snapshot to every reviewer — worth it on big-context models when the user asks for a thorough review (it multiplies token cost by the reviewer count). Optional: `"agentic": true` makes each reviewer a sub-agent that explores the repo with read-only tools instead of reading a fixed snapshot — deeper, evidence-grounded findings on larger repos; prefer it when the user asks for a deep/thorough investigation.
 IMPORTANT: when the user asks for a swarm or multi-agent review, CALL THIS TOOL as your first action. Do NOT simulate the swarm yourself — no reading the files and hand-writing a "multi-agent style" review, no writing or running your own review script. The backend runs real parallel reviewers; your job is the single tool call.""",
 
+    "spawn_agent": """\
+```spawn_agent
+{"goal": "<focused task>", "context": "<paths, constraints, what 'done' looks like>"}
+```
+Delegate a focused task to a sub-agent that runs in its OWN fresh context with read-only tools (read_file/grep/glob/ls, and optionally web_search/web_fetch) confined to the allowed folder, and return only its final summary — so your own context stays lean. The child has NO access to this conversation, so put everything it needs in `goal`/`context`. Run several in parallel by passing a list:
+```spawn_agent
+{"tasks": [{"goal": "audit auth.py for security issues"}, {"goal": "map how sessions flow through the codebase"}], "max_rounds": 8}
+```
+Use for investigate-and-report work you want done without filling your context: parallel research, multi-file audits, "go figure out X and summarize." Children are READ-ONLY and cannot spawn their own sub-agents. Not for writing files or running commands — do those yourself.""",
+
     "manage_processes": """\
 ```manage_processes
 {"action": "start", "command": "npm run dev", "cwd": "<allowed folder>", "name": "dev-server"}

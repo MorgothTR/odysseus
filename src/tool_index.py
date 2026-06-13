@@ -100,6 +100,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "run_code_review_swarm": "Run a read-only local code review swarm over an allowed folder. Uses 5 specialist reviewers by default (max 10), then synthesizes findings. Use for multi-agent reviews, swarm audits, code quality reviews, security/test/performance review, and repo audits. Confined to allowed local folders; does not write files.",
     "manage_processes": "Start, list, read logs of, or stop long-running background services: dev servers (npm run dev, vite, flask, uvicorn), file watchers, emulators. Services keep running between turns; the agent is notified if one crashes. Use for 'start the dev server', 'is the server running', 'show the server logs', 'stop the server'.",
+    "spawn_agent": "Delegate focused tasks to read-only sub-agents that each run in a fresh context and return only a summary, keeping your context lean. Run several in parallel. Use for 'investigate X and report back', parallel multi-file audits, research fan-out, 'have a sub-agent figure out Y'. Children are read-only and cannot spawn more sub-agents.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
@@ -487,6 +488,15 @@ class ToolIndex:
                    "audit the repo", "audit repository", "review repository",
                    "review this repo", "review this codebase"}):
             {"run_code_review_swarm", "grep", "glob", "ls", "read_file"},
+        # Sub-agent delegation — "have an agent investigate", "spawn agents",
+        # "in parallel", "delegate this". Distinct from the review swarm (which
+        # is code-review-specific) — this is general task delegation.
+        frozenset({"spawn agent", "spawn_agent", "sub-agent", "subagent", "sub agent",
+                   "delegate", "delegate to", "delegate this", "in parallel",
+                   "parallel agents", "have an agent", "send an agent",
+                   "agent to investigate", "fan out", "fan-out", "worker agent",
+                   "background agent", "dispatch an agent"}):
+            {"spawn_agent"},
         # Background services / dev servers. Distinct from the cookbook
         # "serve a MODEL" hints above — these are project processes.
         frozenset({"dev server", "dev-server", "npm run dev", "yarn dev", "pnpm dev",

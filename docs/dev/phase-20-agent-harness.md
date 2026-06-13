@@ -191,16 +191,20 @@ tests.
 
 1. **Pre-req (independent): DONE** (commit d55dcb6) — swarm graceful degradation:
    synthesize from non-empty reviewers; error if all empty.
-2. **Phase A: DONE** — `src/subagents.py::run_subagent` (the reusable headless
-   driver) + agentic reviewers behind `"agentic": true` (default off). Each
-   reviewer is a confined read-only sub-agent (read_file/grep/glob/ls,
-   `workspace=root`, 6-round cap) that explores instead of reading a snapshot.
-   Still needs a LIVE run to A/B against snapshot mode before promoting to default.
-3. **Phase B v1:** `spawn_agent`, leaf-only, read-only default toolset, parallel
-   fan-out, registry, the nine hooks, tests. Reuses `run_subagent` as its core.
+2. **Phase A: DONE + LIVE-VALIDATED** — `src/subagents.py::run_subagent` (the
+   reusable headless driver) + agentic reviewers behind `"agentic": true`
+   (default off). Verified in production 2026-06-13: reviewers opened the big
+   files snapshot mode skips (gui.py, overlay.py, decoder.py), grep-hunted the
+   tree, and stayed strictly read-only (35 tool calls, 0 escapes).
+3. **Phase B v1: DONE** — `src/spawn_agent.py` (leaf-only, read-only default
+   toolset via `confine_child_toolset`, parallel fan-out under Semaphore(3),
+   round caps, summary-only returns) on `run_subagent`. Flat depth limit is
+   structural: `SAFE_CHILD_TOOLS` never includes spawn_agent, so a child cannot
+   be handed the tool to recurse. Active-subagent registry in subagents.py. All
+   nine hooks + tests. Still needs a LIVE run.
 4. **Phase B v2:** orchestrator role (opt-in re-delegation), write-capable
    children behind admin gating, staleness/heartbeat monitor, a UI panel for
-   the live sub-agent tree.
+   the live sub-agent tree (the registry is ready for it).
 
 ## Decisions (resolved 2026-06-13)
 All three resolved toward a tight, safe v1; the fancier options move to v2 once

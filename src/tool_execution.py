@@ -1384,6 +1384,17 @@ async def execute_tool_block(
             session_id=session_id,
             workspace=workspace,
         )
+    elif tool == "spawn_agent":
+        from src.spawn_agent import spawn_agent
+
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"spawn_agent: {first_line}"
+        result = await spawn_agent(
+            content,
+            owner=owner,
+            session_id=session_id,
+            workspace=workspace,
+        )
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

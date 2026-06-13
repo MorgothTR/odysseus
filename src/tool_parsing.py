@@ -194,6 +194,13 @@ _TOOL_NAME_MAP = {
     "processes": "manage_processes",
     "process_manager": "manage_processes",
     "background_service": "manage_processes",
+    "spawn_agent": "spawn_agent",
+    "spawn_agents": "spawn_agent",
+    "spawn_subagent": "spawn_agent",
+    "delegate": "spawn_agent",
+    "delegate_task": "spawn_agent",
+    "subagent": "spawn_agent",
+    "sub_agent": "spawn_agent",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

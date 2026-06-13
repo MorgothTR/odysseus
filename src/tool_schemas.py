@@ -169,6 +169,36 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "spawn_agent",
+            "description": "Delegate one or more focused tasks to sub-agents that each run in a fresh context with read-only tools (read_file/grep/glob/ls, optionally web_search/web_fetch) confined to the allowed folder, and return only their final summaries — keeping your own context lean. Children have no access to this conversation (put all needed detail in goal/context), are READ-ONLY, and cannot spawn their own sub-agents. Use for parallel research, multi-file audits, and investigate-and-report work. Not for writing files or running commands.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "The task for a single sub-agent (use this OR tasks)"},
+                    "context": {"type": "string", "description": "Background the child needs: file paths, constraints, what 'done' looks like (the child has no other memory)"},
+                    "tasks": {
+                        "type": "array",
+                        "description": "Multiple tasks to run in parallel, each an object with goal and optional context/tools",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "goal": {"type": "string"},
+                                "context": {"type": "string"},
+                                "tools": {"type": "array", "items": {"type": "string"}, "description": "Subset of read_file/grep/glob/ls/web_search/web_fetch; defaults to read-only nav"}
+                            },
+                            "required": ["goal"]
+                        }
+                    },
+                    "model": {"type": "string", "description": "Optional model override for the sub-agents; defaults to Utility/Default"},
+                    "max_rounds": {"type": "integer", "description": "Tool-loop budget per sub-agent (default 8, max 15)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "manage_processes",
             "description": "Manage long-running background services (dev servers like 'npm run dev', file watchers, emulators): start a detached process that keeps running between turns, list services, read their recent logs, or stop one. Use for anything that should KEEP running — for finite long jobs (installs, builds, downloads) use bash with a #!bg first line instead. The agent is notified automatically if a started service crashes.",
             "parameters": {
@@ -1288,7 +1318,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")

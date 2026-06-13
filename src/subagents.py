@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+import threading
+import uuid
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +36,78 @@ DEFAULT_SUBAGENT_ROUNDS = 6
 # bash/python/write/edit/spawn — a sub-agent investigates, it does not mutate.
 READONLY_TOOLSET: Set[str] = frozenset({"read_file", "grep", "glob", "ls"})
 
+# The widest toolset a sub-agent may be granted (phase 20B, leaf-only): read-only
+# code navigation plus read-only web lookup for research tasks. Everything else —
+# bash, python, file writes, model serving, messaging, and crucially spawn_agent
+# itself — is excluded, which is what enforces the flat one-level depth limit:
+# a child literally cannot be handed the tool to spawn grandchildren.
+SAFE_CHILD_TOOLS: Set[str] = frozenset(READONLY_TOOLSET | {"web_search", "web_fetch"})
+
 
 def _all_tool_names() -> Set[str]:
     """Every built-in tool name, so the allowlist can be inverted to a denylist."""
     from src.agent_loop import TOOL_SECTIONS
 
     return set(TOOL_SECTIONS.keys())
+
+
+def confine_child_toolset(requested: Optional[Set[str]]) -> Set[str]:
+    """Intersect a requested toolset with SAFE_CHILD_TOOLS; default to read-only.
+
+    A child can never be granted a tool outside the safe set — not bash, not a
+    write tool, and not spawn_agent (so it cannot spawn grandchildren). An empty
+    or fully-rejected request falls back to the read-only navigation set."""
+    if not requested:
+        return set(READONLY_TOOLSET)
+    confined = {t for t in requested if t in SAFE_CHILD_TOOLS}
+    return confined or set(READONLY_TOOLSET)
+
+
+def resolve_subagent_candidates(model_spec: str, owner: Optional[str]) -> Tuple[List[Candidate], str]:
+    """Resolve the model endpoint(s) a sub-agent runs on: an explicit override,
+    else the configured Utility/Default model plus its fallback chain."""
+    if model_spec:
+        from src.ai_interaction import _resolve_model
+
+        url, model, headers = _resolve_model(model_spec, owner=owner)
+        return [(url, model, headers)], model
+
+    from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
+
+    url, model, headers = resolve_endpoint("utility", owner=owner)
+    candidates: List[Candidate] = []
+    if url and model:
+        candidates.append((url, model, headers))
+    candidates.extend(resolve_utility_fallback_candidates(owner=owner))
+    if not candidates:
+        raise ValueError("No utility/default model endpoint is configured for sub-agents")
+    return candidates, str(candidates[0][1] or "")
+
+
+# ── Active sub-agent registry ────────────────────────────────────────────────
+# Lightweight in-memory record of which sub-agents are running right now. Same
+# shape as bg_jobs' store; drives observability (and, in a later phase, a live
+# sub-agent tree + interrupt). Cleared on process restart — sub-agents are
+# in-flight work, not durable state.
+_active_subagents: Dict[str, Dict[str, Any]] = {}
+_active_lock = threading.Lock()
+
+
+def _register_subagent(label: str, model: Optional[str]) -> str:
+    sid = uuid.uuid4().hex[:12]
+    with _active_lock:
+        _active_subagents[sid] = {"id": sid, "label": label[:80], "model": model, "status": "running"}
+    return sid
+
+
+def _unregister_subagent(sid: str) -> None:
+    with _active_lock:
+        _active_subagents.pop(sid, None)
+
+
+def list_active_subagents() -> List[Dict[str, Any]]:
+    with _active_lock:
+        return [dict(rec) for rec in _active_subagents.values()]
 
 
 async def run_subagent(
@@ -52,6 +120,7 @@ async def run_subagent(
     fallbacks: Optional[List[Candidate]] = None,
     max_rounds: int = DEFAULT_SUBAGENT_ROUNDS,
     owner: Optional[str] = None,
+    label: Optional[str] = None,
 ) -> str:
     """Drive a confined, bounded agent loop and return its final text.
 
@@ -79,30 +148,34 @@ async def run_subagent(
 
     full_text = ""
     tool_results: List[str] = []
-    async for event_str in stream_agent_loop(
-        endpoint_url=url,
-        model=model,
-        messages=messages,
-        headers=headers or {},
-        max_rounds=max_rounds,
-        relevant_tools=set(toolset),
-        disabled_tools=disabled,
-        workspace=root,
-        owner=owner,
-        fallbacks=fallbacks or [],
-    ):
-        if not event_str.startswith("data: ") or event_str.startswith("data: [DONE]"):
-            continue
-        try:
-            data = json.loads(event_str[6:])
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if "delta" in data:
-            full_text += data["delta"]
-        elif data.get("type") == "tool_output":
-            summary = data.get("stdout") or data.get("output") or data.get("result") or ""
-            if isinstance(summary, str) and summary.strip():
-                tool_results.append(f"[{data.get('tool', '?')}] {summary[:400]}")
+    sid = _register_subagent(label or goal.splitlines()[0] if goal else "subagent", model)
+    try:
+        async for event_str in stream_agent_loop(
+            endpoint_url=url,
+            model=model,
+            messages=messages,
+            headers=headers or {},
+            max_rounds=max_rounds,
+            relevant_tools=set(toolset),
+            disabled_tools=disabled,
+            workspace=root,
+            owner=owner,
+            fallbacks=fallbacks or [],
+        ):
+            if not event_str.startswith("data: ") or event_str.startswith("data: [DONE]"):
+                continue
+            try:
+                data = json.loads(event_str[6:])
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if "delta" in data:
+                full_text += data["delta"]
+            elif data.get("type") == "tool_output":
+                summary = data.get("stdout") or data.get("output") or data.get("result") or ""
+                if isinstance(summary, str) and summary.strip():
+                    tool_results.append(f"[{data.get('tool', '?')}] {summary[:400]}")
+    finally:
+        _unregister_subagent(sid)
 
     full_text = full_text.strip()
     if full_text:
