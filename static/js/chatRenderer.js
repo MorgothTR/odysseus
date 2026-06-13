@@ -1959,6 +1959,32 @@ export function addMessage(role, content, modelName, metadata) {
 
       const maxRound = Math.max(...Object.keys(toolsByRound).map(Number), roundTexts.length);
 
+      // Reasoning-model thinking is saved separately (metadata.thinking) and has
+      // no slot in roundTexts/tool_events, so this agent reconstruction would drop
+      // it — unlike the plain-message path below. Render it once as a leading
+      // collapsible so it survives reload (it streamed live but otherwise vanishes
+      // when the user navigates away and back).
+      if (metadata.thinking) {
+        const tWrap = document.createElement('div');
+        tWrap.className = 'msg msg-ai';
+        const tRole = document.createElement('div');
+        tRole.className = 'role';
+        const tPair = replyModelPair(modelName, metadata);
+        const tModel = tPair.actualModel || tPair.requestedModel;
+        tRole.textContent = modelRouteLabel(tPair.requestedModel, tModel);
+        applyModelColor(tRole, tModel);
+        tRole.appendChild(roleTimestamp(metadata?.timestamp));
+        tWrap.appendChild(tRole);
+        const tBody = document.createElement('div');
+        tBody.className = 'body';
+        const tTime = metadata.thinking_time || null;
+        tBody.innerHTML = markdownModule.processWithThinking(
+          '<think' + (tTime ? ` time="${tTime}"` : '') + '>' + metadata.thinking + '</think>'
+        );
+        tWrap.appendChild(tBody);
+        box.appendChild(tWrap);
+      }
+
       for (let r = 0; r < maxRound; r++) {
         const roundNum = r + 1;
         const txt = (roundTexts[r] || '').trim();
