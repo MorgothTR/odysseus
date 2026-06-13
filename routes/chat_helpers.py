@@ -781,6 +781,7 @@ def save_assistant_response(
     do_research: bool = False,
     tool_events: list = None,
     incognito: bool = False,
+    reasoning: str = "",
 ):
     """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence."""
     md = dict(last_metrics) if last_metrics else {}
@@ -822,6 +823,14 @@ def save_assistant_response(
         _content = _think_info["reply"]
     else:
         _content = full_response
+    # Reasoning-model thinking (kimi/DeepSeek reasoning_content) streams on a
+    # separate channel flagged thinking:true and never appears as a <think> block
+    # in the content, so _extract_thinking_meta above can't recover it. Persist it
+    # into metadata.thinking so the thinking section re-renders on reload instead
+    # of vanishing when the user navigates away and back. Stored in metadata only —
+    # never folded into _content — so it stays out of the API resend path.
+    if reasoning and reasoning.strip() and not md.get("thinking"):
+        md["thinking"] = reasoning.strip()
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:

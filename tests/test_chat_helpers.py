@@ -160,3 +160,55 @@ def test_save_assistant_response_preserves_actual_and_requested_model():
 
     assert sess.history[-1].metadata["requested_model"] == "selected-model"
     assert sess.history[-1].metadata["model"] == "actual-model"
+
+
+def test_save_assistant_response_persists_reasoning_to_metadata():
+    # Reasoning-model thinking (kimi/DeepSeek reasoning_content) arrives on a
+    # separate channel and never appears as <think> in the content. It must be
+    # persisted into metadata.thinking so it survives a reload, WITHOUT polluting
+    # the saved content (which is re-sent to the API).
+    sess = _FakeSession()
+    save_assistant_response(
+        sess,
+        session_manager=None,
+        session_id="s1",
+        full_response="The answer is 42.",
+        last_metrics={"model": "kimi-k2.6"},
+        incognito=True,
+        reasoning="Let me work through this step by step...",
+    )
+    msg = sess.history[-1]
+    assert msg.metadata["thinking"] == "Let me work through this step by step..."
+    assert msg.content == "The answer is 42."  # reasoning stays OUT of content
+
+
+def test_save_assistant_response_inline_think_takes_precedence_over_reasoning():
+    # If the content already carries an inline <think> block, that extracted
+    # thinking wins; the separate reasoning arg must not clobber it.
+    sess = _FakeSession()
+    save_assistant_response(
+        sess,
+        session_manager=None,
+        session_id="s1",
+        full_response="<think>inline reasoning</think>\n\nFinal reply.",
+        last_metrics={"model": "qwq"},
+        incognito=True,
+        reasoning="channel reasoning",
+    )
+    msg = sess.history[-1]
+    assert msg.metadata["thinking"] == "inline reasoning"
+    assert msg.content == "Final reply."
+
+
+def test_save_assistant_response_no_reasoning_leaves_no_thinking_key():
+    sess = _FakeSession()
+    save_assistant_response(
+        sess,
+        session_manager=None,
+        session_id="s1",
+        full_response="plain reply, no thinking",
+        last_metrics={"model": "gemma3"},
+        incognito=True,
+        reasoning="",
+    )
+    assert "thinking" not in sess.history[-1].metadata

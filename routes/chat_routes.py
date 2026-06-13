@@ -868,6 +868,7 @@ def setup_chat_routes(
                 yield f"data: {json.dumps({'type': 'compacted', 'context_length': ctx.context_length})}\n\n"
 
             full_response = ""
+            full_reasoning = ""  # reasoning_content (thinking:true) deltas — persisted to metadata.thinking so thinking survives reload
             last_metrics = None
 
             # Configured fallback chain for the default chat model. Tried in
@@ -959,6 +960,8 @@ def setup_chat_routes(
                                     if not data.get("thinking"):
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
+                                    else:
+                                        full_reasoning += data["delta"]
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
@@ -1027,6 +1030,7 @@ def setup_chat_routes(
                                     used_memories=ctx.used_memories,
                                     do_research=effective_do_research,
                                     incognito=incognito,
+                                    reasoning=full_reasoning,
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
@@ -1107,6 +1111,8 @@ def setup_chat_routes(
                                     if not data.get("thinking"):
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
+                                    else:
+                                        full_reasoning += data["delta"]
                                     yield chunk
                                 elif data.get("type") == "web_sources":
                                     web_sources = data.get("data", [])
@@ -1156,6 +1162,7 @@ def setup_chat_routes(
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
                                     incognito=incognito,
+                                    reasoning=full_reasoning,
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
