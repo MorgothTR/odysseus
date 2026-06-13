@@ -212,3 +212,26 @@ def test_save_assistant_response_no_reasoning_leaves_no_thinking_key():
         reasoning="",
     )
     assert "thinking" not in sess.history[-1].metadata
+
+
+def test_save_assistant_response_strips_stray_think_tags_when_reasoning_present():
+    # A reasoning model can leak a lone </think> into the content channel at the
+    # reasoning->answer boundary. With the reasoning stored in metadata, that orphan
+    # tag must be stripped or it corrupts the reload renderer (which wraps
+    # metadata.thinking in its own <think>...</think>), leaving a non-clickable
+    # widget and a visible </think>.
+    sess = _FakeSession()
+    save_assistant_response(
+        sess,
+        session_manager=None,
+        session_id="s1",
+        full_response="</think>The sub-agent finished. Here is the summary.",
+        last_metrics={"model": "kimi-k2.7-code"},
+        incognito=True,
+        reasoning="Let me spawn a sub-agent to do this.",
+    )
+    msg = sess.history[-1]
+    assert "</think>" not in msg.content
+    assert "<think" not in msg.content
+    assert msg.content == "The sub-agent finished. Here is the summary."
+    assert msg.metadata["thinking"] == "Let me spawn a sub-agent to do this."
