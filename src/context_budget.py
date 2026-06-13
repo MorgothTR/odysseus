@@ -14,7 +14,10 @@ exactly (clamped to the window). Pure and side-effect free so it is unit-testabl
 # pathologically large prompt every agent turn. Tunable; chosen to fully cover
 # 128K models and give 1M models a large but bounded budget.
 DEFAULT_HARD_MAX = 200_000
-DEFAULT_BUDGET = 6000
+# Fallback budget when the model's context window is unknown. Must comfortably
+# exceed the assembled system prompt (~12K tokens of tool definitions) or the
+# trimmer truncates the tool catalog and the agent can't see most of its tools.
+DEFAULT_BUDGET = 32000
 DEFAULT_HEADROOM = 0.85
 
 

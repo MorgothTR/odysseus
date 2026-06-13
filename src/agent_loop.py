@@ -1863,7 +1863,7 @@ async def stream_agent_loop(
         from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX
         from src.settings import is_setting_overridden
 
-        soft_budget = int(get_setting("agent_input_token_budget", 6000) or 0)
+        soft_budget = int(get_setting("agent_input_token_budget", 32000) or 0)
         if soft_budget > 0:
             before_trim_tokens = estimate_tokens(messages)
             reserve_tokens = min(max(max_tokens or 1024, 512), 2048)
