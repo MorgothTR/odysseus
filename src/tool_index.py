@@ -488,14 +488,20 @@ class ToolIndex:
                    "audit the repo", "audit repository", "review repository",
                    "review this repo", "review this codebase"}):
             {"run_code_review_swarm", "grep", "glob", "ls", "read_file"},
-        # Sub-agent delegation — "have an agent investigate", "spawn agents",
-        # "in parallel", "delegate this". Distinct from the review swarm (which
-        # is code-review-specific) — this is general task delegation.
-        frozenset({"spawn agent", "spawn_agent", "sub-agent", "subagent", "sub agent",
+        # Sub-agent delegation — "spawn two sub-agents", "have an agent
+        # investigate", "delegate this", "in parallel". Distinct from the review
+        # swarm (code-review-specific) — this is general task delegation.
+        # NB: list singular AND plural forms — "\bsub-agent\b" does NOT match
+        # "sub-agents" (the trailing s breaks the word boundary).
+        frozenset({"spawn", "spawn agent", "spawn agents", "spawn_agent",
+                   "spawn a sub-agent", "spawn sub-agents", "spawn two",
+                   "sub-agent", "sub-agents", "subagent", "subagents",
+                   "sub agent", "sub agents", "two agents", "three agents",
                    "delegate", "delegate to", "delegate this", "in parallel",
-                   "parallel agents", "have an agent", "send an agent",
-                   "agent to investigate", "fan out", "fan-out", "worker agent",
-                   "background agent", "dispatch an agent"}):
+                   "parallel agents", "have an agent", "have agents",
+                   "send an agent", "agent to investigate", "agents to",
+                   "fan out", "fan-out", "worker agent", "worker agents",
+                   "background agent", "dispatch an agent", "dispatch agents"}):
             {"spawn_agent"},
         # Background services / dev servers. Distinct from the cookbook
         # "serve a MODEL" hints above — these are project processes.

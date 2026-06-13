@@ -285,7 +285,8 @@ Delegate a focused task to a sub-agent that runs in its OWN fresh context with r
 ```spawn_agent
 {"tasks": [{"goal": "audit auth.py for security issues"}, {"goal": "map how sessions flow through the codebase"}], "max_rounds": 8}
 ```
-Use for investigate-and-report work you want done without filling your context: parallel research, multi-file audits, "go figure out X and summarize." Children are READ-ONLY and cannot spawn their own sub-agents. Not for writing files or running commands — do those yourself.""",
+Use for investigate-and-report work you want done without filling your context: parallel research, multi-file audits, "go figure out X and summarize." Children are READ-ONLY and cannot spawn their own sub-agents. Not for writing files or running commands — do those yourself.
+IMPORTANT: when the user asks you to spawn/delegate to sub-agents, actually CALL this tool — do NOT do the investigation yourself with read_file/bash/python and present it as if sub-agents did it. The whole point is that the children burn their own context, not yours.""",
 
     "manage_processes": """\
 ```manage_processes

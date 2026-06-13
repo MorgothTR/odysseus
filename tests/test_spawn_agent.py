@@ -31,6 +31,27 @@ def test_spawn_agent_is_registered():
     assert "spawn_agent" not in PLAN_MODE_READONLY_TOOLS
 
 
+def test_spawn_agent_surfaces_for_natural_phrasings():
+    # The query that missed in production ("Spawn two sub-agents") plus other
+    # natural forms must force-include spawn_agent regardless of RAG ranking.
+    from src.tool_index import ToolIndex
+
+    ti = object.__new__(ToolIndex)
+    ti.retrieve = lambda q, k=8: []  # simulate RAG missing it entirely
+
+    for query in [
+        "Spawn two sub-agents: one to audit decoder.py and one to map the resolution subsystem",
+        "delegate this to a sub-agent",
+        "have agents investigate these files in parallel",
+        "spawn an agent to research X",
+    ]:
+        tools = ToolIndex.get_tools_for_query(ti, query, 8)
+        assert "spawn_agent" in tools, query
+
+    # Negative control: an ordinary request must NOT pull it in.
+    assert "spawn_agent" not in ToolIndex.get_tools_for_query(ti, "fix the typo in the readme", 8)
+
+
 def test_spawn_agent_aliases_and_structured_args():
     block = function_call_to_tool_block("delegate", json.dumps({"goal": "investigate X"}))
     assert block is not None and block.tool_type == "spawn_agent"
