@@ -440,9 +440,9 @@
       "sha256": "933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1"
     },
     {
-      "filename": "pytest-9.0.3-py3-none-any.whl",
-      "size": 375249,
-      "sha256": "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9"
+      "filename": "pytest-9.1.0-py3-none-any.whl",
+      "size": 386453,
+      "sha256": "8ebb0e7888bdf2bdfc602ec51f8f62d50200af37356c74e503c79a94f5c81f32"
     },
     {
       "filename": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
