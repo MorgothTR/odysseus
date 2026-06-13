@@ -199,11 +199,22 @@ tests.
    children behind admin gating, staleness/heartbeat monitor, a UI panel for
    the live sub-agent tree.
 
-## Open decisions (resolve before cutting Phase B)
-- Do children get **write** tools at all in v1, or strictly read-only until v2?
-  (Lean read-only — safer, and covers the review/research use cases.)
-- Surface child progress to the user live (stream child `delta`s up as
-  `tool_progress`-style events) or only the final summaries? (Lean: summaries v1,
-  live tree v2.)
-- Token-budget ceiling per spawn call, or rely on round caps + Ollama being
-  cheap? (Lean: round caps for v1; revisit if cost surprises.)
+## Decisions (resolved 2026-06-13)
+All three resolved toward a tight, safe v1; the fancier options move to v2 once
+the harness is proven in use.
+
+1. **Child tools — READ-ONLY in v1.** Children get `{read_file, grep, glob, ls}`
+   only. Covers review/research/audit; no risk of parallel children clobbering
+   each other's edits. Write-capable children (behind admin gating) are v2.
+2. **Progress UX — SUMMARIES ONLY in v1.** `spawn_agent` returns each child's
+   final summary + status; no live event streaming. The live sub-agent tree
+   (new streamed event types + UI panel) is v2 — same shape as `manage_processes`
+   shipping logs-on-demand before any UI.
+3. **Budget — ROUND CAPS ONLY in v1.** `max_rounds` per child + concurrency cap
+   of 3 bound the work; no per-token accounting. Justified by kimi-on-Ollama
+   being cheap. A hard token ceiling per spawn is a v2 add, only if cost
+   surprises.
+
+These collapse Phase B v1 to: leaf-only, read-only toolset, parallel fan-out
+under a semaphore, summary-only returns, round-capped, with the registry and the
+nine registration hooks.
