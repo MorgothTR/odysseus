@@ -2114,6 +2114,46 @@ export function addMessage(role, content, modelName, metadata) {
         }
       }
 
+      // Belt-and-suspenders: the message `text` (content) is the authoritative full
+      // answer. If a final answer landed in content but NOT in round_texts (e.g. the
+      // grace-synthesis path appends to full_response only), the loop above never
+      // rendered it — the actual answer would be invisible on reload. Recover the
+      // uncovered tail of content and render it as a final bubble. No-op when
+      // round_texts already covers the content (the normal case).
+      try {
+        const _joined = roundTexts.map(t => (t || '').trim()).filter(Boolean);
+        const _full = (text || '').trim();
+        if (_full) {
+          let _tail = '';
+          if (!_joined.length) {
+            _tail = _full;                       // nothing rendered from rounds — show it all
+          } else {
+            const _anchor = _joined[_joined.length - 1].slice(-50);
+            const _i = _anchor ? _full.lastIndexOf(_anchor) : -1;
+            if (_i >= 0) _tail = _full.slice(_i + _anchor.length).trim();
+          }
+          if (_tail && _tail.length > 24) {
+            const fWrap = document.createElement('div');
+            fWrap.className = 'msg msg-ai msg-continuation';
+            const fRole = document.createElement('div');
+            fRole.className = 'role';
+            const _fp = replyModelPair(modelName, metadata);
+            const _fm = _fp.actualModel || _fp.requestedModel;
+            fRole.textContent = modelRouteLabel(_fp.requestedModel, _fm);
+            applyModelColor(fRole, _fm);
+            fWrap.appendChild(fRole);
+            const fBody = document.createElement('div');
+            fBody.className = 'body';
+            fBody.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(_tail));
+            fWrap.appendChild(fBody);
+            fWrap.dataset.raw = _tail;
+            box.appendChild(fWrap);
+            lastWrap = fWrap;
+            lastMsgAi = fWrap;
+          }
+        }
+      } catch (_e) { /* best-effort recovery — never break the render */ }
+
       const firstWrap = lastMsgAi || lastWrap;
       if (firstWrap && firstWrap.classList.contains('msg-ai')) {
         if (metadata?.memories_used?.length) firstWrap._memoriesUsed = metadata.memories_used;
