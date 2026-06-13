@@ -235,3 +235,25 @@ def test_save_assistant_response_strips_stray_think_tags_when_reasoning_present(
     assert "<think" not in msg.content
     assert msg.content == "The sub-agent finished. Here is the summary."
     assert msg.metadata["thinking"] == "Let me spawn a sub-agent to do this."
+
+
+def test_save_assistant_response_prefers_round_reasonings_over_flat_thinking():
+    # Agent turns carry per-round reasoning in metadata.round_reasonings (from the
+    # agent metrics). The flat metadata.thinking must NOT also be set — the agent
+    # renderer prefers the per-round array and a duplicate would render twice.
+    sess = _FakeSession()
+    save_assistant_response(
+        sess,
+        session_manager=None,
+        session_id="s1",
+        full_response="Final answer.",
+        last_metrics={
+            "model": "kimi-k2.7-code",
+            "round_reasonings": ["round 0 thinking", "", "round 2 thinking"],
+        },
+        incognito=True,
+        reasoning="round 0 thinking round 2 thinking",
+    )
+    msg = sess.history[-1]
+    assert "thinking" not in msg.metadata  # not flattened
+    assert msg.metadata["round_reasonings"] == ["round 0 thinking", "", "round 2 thinking"]
