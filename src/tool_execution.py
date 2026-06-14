@@ -126,6 +126,13 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
         n = status.split(":", 1)[1]
         return {"error": f"edit_file: old_string is not unique in {path} ({n} matches). Add surrounding context or set replace_all=true.", "exit_code": 1}
 
+    # Snapshot the pre-edit content so this change can be rolled back (best-effort).
+    try:
+        from src.checkpoints import record_edit
+        record_edit(path, original, updated, tool="edit_file", workspace=workspace)
+    except Exception:
+        pass
+
     n = original.count(old)
     result = {"output": f"Edited {path} ({n} replacement{'s' if n != 1 else ''})", "exit_code": 0}
     diff = _unified_diff(original, updated, path)
@@ -832,6 +839,12 @@ async def _direct_fallback(
                 return {"error": f"write_file: {path}: permission denied", "exit_code": 1}
             except OSError as e:
                 return {"error": f"write_file: {path}: {e}", "exit_code": 1}
+            # Snapshot the pre-write content so this write can be rolled back (best-effort).
+            try:
+                from src.checkpoints import record_edit
+                record_edit(path, old_content, body, tool="write_file", workspace=workspace)
+            except Exception:
+                pass
             diff = _unified_diff(old_content, body, path)
             result = {"output": f"Wrote {size} bytes to {path}", "exit_code": 0}
             if diff:
@@ -1406,6 +1419,11 @@ async def execute_tool_block(
 
         desc = f"semantic_code_search: {content.split(chr(10))[0][:80]}"
         result = await semantic_code_search(content, workspace=workspace, owner=owner)
+    elif tool == "manage_checkpoints":
+        from src.checkpoints import manage_checkpoints
+
+        desc = f"manage_checkpoints: {content.split(chr(10))[0][:80]}"
+        result = await manage_checkpoints(content, workspace=workspace, owner=owner)
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

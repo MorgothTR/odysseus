@@ -290,6 +290,12 @@ IMPORTANT: check_code IS your tool for finding code errors. When you want to lin
 ```
 Find code by MEANING across the workspace — describe the behaviour or concept ("where the retry/backoff logic lives", "how auth tokens are validated", "the function that loads settings") and get back the most relevant code as ranked file:line snippets, even when you don't know the exact name or file. It embeds the source into a vector index that stays fresh as files change. Use this when you'd have to GUESS the literal string for grep; use grep when you already KNOW the exact text/symbol. Optional "path" scopes to a sub-folder, "k" caps results. Read-only; confined to the workspace.""",
 
+    "manage_checkpoints": """\
+```manage_checkpoints
+{"action": "list"}
+```
+Undo / roll back your own file edits. Every edit_file and write_file is snapshotted automatically, so a bad change is always recoverable. `action:list` shows recent edits (newest first, each with an id); `action:restore` writes the pre-edit content back — `target` is "last" (the most recent edit), "last N" (the last N edits), a checkpoint id, or a file path (restores that file to before you touched it); `action:diff` with a `target` id shows what that edit changed. Use this when the user says "undo that", "revert <file>", "roll back", or "what did you just change" — don't try to reconstruct the old content by hand.""",
+
     "spawn_agent": """\
 ```spawn_agent
 {"goal": "<focused task>", "context": "<paths, constraints, what 'done' looks like>"}

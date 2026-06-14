@@ -25,6 +25,7 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "spawn_agent",
     "check_code",
     "semantic_code_search",
+    "manage_checkpoints",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -116,6 +117,9 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
     "manage_webhooks", "manage_tokens", "manage_settings", "manage_contact",
+    # Restores files to a prior snapshot — writes to disk, so a mutator (list/diff
+    # are read-only, but the tool gate is per-tool, not per-action).
+    "manage_checkpoints",
     "manage_calendar", "api_call", "app_api", "ui_control",
     "send_email", "reply_to_email", "bulk_email", "delete_email",
     "archive_email", "mark_email_read", "download_model", "serve_model",
