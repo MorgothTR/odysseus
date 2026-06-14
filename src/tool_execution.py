@@ -764,7 +764,9 @@ async def _direct_fallback(
             if _stripped.startswith("{"):
                 try:
                     _a = json.loads(_stripped)
-                    raw_path = str(_a.get("path", "")).strip()
+                    raw_path = str(_a.get("path") or _a.get("file") or _a.get("file_path")
+                                   or _a.get("filename") or _a.get("filepath")
+                                   or _a.get("filePath") or "").strip()
                     offset = int(_a.get("offset") or 0)
                     limit = int(_a.get("limit") or 0)
                 except (json.JSONDecodeError, TypeError, ValueError):

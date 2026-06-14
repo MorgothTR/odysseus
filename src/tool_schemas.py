@@ -1363,7 +1363,15 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         if args.get("offset") or args.get("limit"):
             content = json.dumps(args)
         else:
-            content = args.get("path", "")
+            # Tolerate the path keys models reach for besides "path" (file,
+            # file_path, filename, …); last resort, the first string value —
+            # read_file's only other args are offset/limit (ints), so any stray
+            # string IS the path. Stops a wasted "path is required" retry round.
+            content = (args.get("path") or args.get("file") or args.get("file_path")
+                       or args.get("filename") or args.get("filepath") or args.get("filePath") or "")
+            if not content:
+                content = next((str(v) for v in args.values()
+                                if isinstance(v, str) and v.strip()), "")
     elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code", "semantic_code_search", "manage_checkpoints"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
