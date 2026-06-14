@@ -214,6 +214,12 @@ _TOOL_NAME_MAP = {
     "semantic_search": "semantic_code_search",
     "find_code": "semantic_code_search",
     "codesearch": "semantic_code_search",
+    "manage_checkpoints": "manage_checkpoints",
+    "checkpoints": "manage_checkpoints",
+    "checkpoint": "manage_checkpoints",
+    "undo": "manage_checkpoints",
+    "rollback": "manage_checkpoints",
+    "restore_file": "manage_checkpoints",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

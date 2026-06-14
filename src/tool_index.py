@@ -103,6 +103,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "spawn_agent": "Delegate focused tasks to read-only sub-agents that each run in a fresh context and return only a summary, keeping your context lean. Run several in parallel. Use for 'investigate X and report back', parallel multi-file audits, research fan-out, 'have a sub-agent figure out Y'. Children are read-only and cannot spawn more sub-agents.",
     "check_code": "Run a static checker (lint/type-check) on a file or folder and return structured errors without running the code: undefined names, unused imports, syntax errors (Python via bundled ruff), and type errors (JS/TS via the project's tsc). Use to verify edits, find bugs, 'check for errors', 'lint this', 'are there type errors', or before reporting an edit done.",
     "semantic_code_search": "Search the workspace's code by MEANING (vector/semantic search), not literal text — describe the behaviour or concept ('where requests are retried', 'how auth tokens are validated', 'the settings loader') and get ranked file:line snippets even without the exact name. Use when you'd have to guess the literal string for grep; use grep when you know the exact text. 'find the code that...', 'where is X handled', 'which file does Y'.",
+    "manage_checkpoints": "Undo / roll back the agent's file edits. Every edit_file/write_file is auto-snapshotted; action=list shows recent edits, action=restore reverts them (last / last N / id / file), action=diff shows what changed. Use for 'undo that', 'undo your last change', 'revert <file>', 'roll back', 'what did you just change'.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
@@ -507,6 +508,12 @@ class ToolIndex:
                    "which file", "how does", "find where", "locate the", "find similar code",
                    "search by meaning", "vector search", "code search"}):
             {"semantic_code_search"},
+        # Undo / rollback of the agent's file edits (auto-snapshotted).
+        frozenset({"manage_checkpoints", "checkpoint", "checkpoints", "undo",
+                   "undo that", "undo your last", "undo the change", "undo the edit",
+                   "revert", "roll back", "rollback", "restore the file",
+                   "what did you change", "what did you just change", "discard changes"}):
+            {"manage_checkpoints"},
         # Sub-agent delegation — "spawn two sub-agents", "have an agent
         # investigate", "delegate this", "in parallel". Distinct from the review
         # swarm (code-review-specific) — this is general task delegation.

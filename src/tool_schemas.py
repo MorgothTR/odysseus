@@ -199,6 +199,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_checkpoints",
+            "description": "Inspect and ROLL BACK the agent's file edits. Every edit_file/write_file is snapshotted automatically, so you can undo a bad change. action=list shows recent edits (newest first, with ids); action=restore undoes them (target: 'last', 'last 3', a checkpoint id, or a file path — writes the pre-edit content back); action=diff shows what one edit changed. Use when the user says 'undo that', 'revert <file>', 'roll back', or 'what did you just change'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "restore", "diff"], "description": "list | restore | diff"},
+                    "target": {"type": "string", "description": "For restore: 'last', 'last N', a checkpoint id, or a file path. For diff: a checkpoint id."},
+                    "limit": {"type": "integer", "description": "For list: how many recent edits to show (default 20)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "spawn_agent",
             "description": "Delegate one or more focused tasks to sub-agents that each run in a fresh context with read-only tools (read_file/grep/glob/ls, optionally web_search/web_fetch) confined to the allowed folder, and return only their final summaries — keeping your own context lean. Children have no access to this conversation (put all needed detail in goal/context), are READ-ONLY, and cannot spawn their own sub-agents. Use for parallel research, multi-file audits, and investigate-and-report work. Not for writing files or running commands.",
             "parameters": {
@@ -1348,7 +1364,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = json.dumps(args)
         else:
             content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code", "semantic_code_search"):
+    elif tool_type in ("grep", "glob", "ls", "run_code_review_swarm", "manage_processes", "spawn_agent", "check_code", "semantic_code_search", "manage_checkpoints"):
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
