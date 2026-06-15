@@ -11,6 +11,7 @@ const PYTHON_EXE = path.join(PYTHON_DIR, "python.exe");
 const OUT_DIR = path.join(REPO_ROOT, "src-tauri", "resources", "wheelhouse");
 const REQUIREMENTS_PATH = path.join(REPO_ROOT, "requirements.txt");
 const MANIFEST_PATH = path.join(SCRIPT_DIR, "python-wheelhouse.manifest.json");
+const LOCK_PATH = path.join(REPO_ROOT, "requirements.lock");
 const UPDATE_MANIFEST =
   process.argv.includes("--update-manifest") || process.env.ODYSSEUS_UPDATE_WHEELHOUSE_MANIFEST === "1";
 
@@ -41,24 +42,28 @@ function assertBundledPython() {
   }
 }
 
-function downloadWheelhouse() {
+function downloadWheelhouse(useLock) {
   rmSync(OUT_DIR, { recursive: true, force: true });
   mkdirSync(OUT_DIR, { recursive: true });
-  execFileSync(
-    PYTHON_EXE,
-    [
-      "-m",
-      "pip",
-      "download",
-      "--disable-pip-version-check",
-      "--only-binary=:all:",
-      "--dest",
-      OUT_DIR,
-      "-r",
-      REQUIREMENTS_PATH,
-    ],
-    { cwd: REPO_ROOT, stdio: "inherit" },
-  );
+  const args = [
+    "-m",
+    "pip",
+    "download",
+    "--disable-pip-version-check",
+    "--only-binary=:all:",
+    "--dest",
+    OUT_DIR,
+    "-r",
+    REQUIREMENTS_PATH,
+  ];
+  // On normal builds, constrain every package (direct + transitive) to the
+  // committed lock so the wheelhouse is reproducible and the manifest cannot
+  // drift. When refreshing the manifest we deliberately resolve free to pick up
+  // intended upgrades, then rewrite the lock from whatever resolved.
+  if (useLock && existsSync(LOCK_PATH)) {
+    args.push("-c", LOCK_PATH);
+  }
+  execFileSync(PYTHON_EXE, args, { cwd: REPO_ROOT, stdio: "inherit" });
 }
 
 function wheelEntries() {
@@ -90,6 +95,30 @@ function buildManifest() {
   };
 }
 
+function writeLockFile(manifest) {
+  // Wheel filenames escape the distribution name's separators to underscores,
+  // so the version is always the 2nd '-'-separated field; normalize the name to
+  // PEP 503 form. Pinning the whole resolved set makes builds reproducible.
+  const pins = manifest.wheels
+    .map((wheel) => {
+      const parts = wheel.filename.split("-");
+      const name = parts[0].replaceAll("_", "-").toLowerCase();
+      return `${name}==${parts[1]}`;
+    })
+    .sort((left, right) => left.localeCompare(right));
+  const header = [
+    "# Auto-generated lock - do NOT edit by hand.",
+    "# Pins every wheel (direct + transitive) so release builds are reproducible",
+    "# and scripts/python-wheelhouse.manifest.json stops drifting. Used as a pip",
+    "# constraints file (-c) on normal builds; rewritten on --update-manifest.",
+    "# Regenerate after changing requirements.txt:",
+    "#   node scripts/prepare-python-wheelhouse.mjs --update-manifest",
+    `# Python ${manifest.pythonVersion}, ${pins.length} packages.`,
+    "",
+  ];
+  writeFileSync(LOCK_PATH, `${header.join("\n")}${pins.join("\n")}\n`, "utf8");
+}
+
 function verifyManifest(actual) {
   if (!existsSync(MANIFEST_PATH)) {
     throw new Error(
@@ -106,7 +135,7 @@ function verifyManifest(actual) {
 }
 
 assertBundledPython();
-downloadWheelhouse();
+downloadWheelhouse(!UPDATE_MANIFEST);
 
 const manifest = buildManifest();
 if (manifest.wheels.length === 0) {
@@ -115,7 +144,9 @@ if (manifest.wheels.length === 0) {
 
 if (UPDATE_MANIFEST) {
   writeFileSync(MANIFEST_PATH, stableJson(manifest), "utf8");
+  writeLockFile(manifest);
   console.log(`Updated Python wheelhouse manifest: ${normalizeRepoPath(MANIFEST_PATH)}`);
+  console.log(`Updated requirements lock: ${normalizeRepoPath(LOCK_PATH)}`);
 } else {
   verifyManifest(manifest);
 }
