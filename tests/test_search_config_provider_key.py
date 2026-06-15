@@ -25,6 +25,15 @@ def test_search_config_detects_active_provider_specific_key(monkeypatch):
     assert config["has_api_key"] is True
 
 
+def test_search_config_detects_exa_key(monkeypatch):
+    config = _config(monkeypatch, {
+        "search_provider": "exa",
+        "exa_api_key": "exa-key",
+    })
+
+    assert config["has_api_key"] is True
+
+
 def test_search_config_ignores_key_for_different_provider(monkeypatch):
     config = _config(monkeypatch, {
         "search_provider": "brave",

@@ -1,4 +1,4 @@
-"""Search provider implementations: SearXNG, Brave, DuckDuckGo, Google PSE, Tavily, Serper."""
+"""Search provider implementations: SearXNG, Brave, DuckDuckGo, Google PSE, Tavily, Serper, Exa."""
 
 import json
 import logging
@@ -25,6 +25,7 @@ PROVIDER_INFO = {
     "google_pse": ("Google PSE",      True,  False),
     "tavily":   ("Tavily",            True,  False),
     "serper":   ("Serper",            True,  False),
+    "exa":      ("Exa",               True,  False),
     "disabled": ("Disabled",          False, False),
 }
 
@@ -57,6 +58,7 @@ def _get_provider_key(provider: str) -> str:
         "google_pse": "google_pse_key",
         "tavily": "tavily_api_key",
         "serper": "serper_api_key",
+        "exa": "exa_api_key",
     }
     field = key_map.get(provider, "")
     if field:
@@ -72,6 +74,7 @@ def _get_provider_key(provider: str) -> str:
         "google_pse": "GOOGLE_API_KEY",
         "tavily": "TAVILY_API_KEY",
         "serper": "SERPER_API_KEY",
+        "exa": "EXA_API_KEY",
     }
     env_name = env_map.get(provider, "")
     return (os.environ.get(env_name) or "").strip() if env_name else ""
@@ -635,4 +638,82 @@ def serper_search(query: str, count: int = 10, time_filter: Optional[str] = None
         })
 
     logger.info(f"Serper returned {len(results)} results")
+    return results
+
+
+# ── Exa (neural / research-grade search) ──
+
+def exa_search(query: str, count: int = 10, time_filter: Optional[str] = None) -> List[dict]:
+    """Search using Exa's neural search API. Requires exa_api_key or EXA_API_KEY env var.
+
+    Exa is research-grade: instead of keyword matching it embeds the query and
+    finds semantically relevant pages, returning short relevance *highlights*
+    that we use as the snippet (with a capped text fallback). This is the
+    backend deep_research / fusion panels benefit from most.
+    See https://exa.ai/docs/reference/search.
+    """
+    api_key = _get_provider_key("exa") or os.environ.get("EXA_API_KEY", "")
+    if not api_key:
+        logger.warning("Exa: no API key configured")
+        return []
+
+    payload = {
+        "query": query,
+        "numResults": count,
+        # "auto" lets Exa pick neural vs keyword per query.
+        "type": "auto",
+        # Ask for short relevance highlights (cheap, snippet-sized) plus a capped
+        # text fallback so every result still has something to show when Exa
+        # returns no highlight for a page.
+        "contents": {
+            "highlights": {"numSentences": 3, "highlightsPerUrl": 1},
+            "text": {"maxCharacters": 500},
+        },
+    }
+    if time_filter:
+        days_map = {"day": 1, "week": 7, "month": 30, "year": 365}
+        days = days_map.get(time_filter)
+        if days:
+            from datetime import datetime, timedelta, timezone
+            start = datetime.now(timezone.utc) - timedelta(days=days)
+            payload["startPublishedDate"] = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    try:
+        response = httpx.post(
+            "https://api.exa.ai/search",
+            json=payload,
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if response.status_code == 429:
+            raise RateLimitError("Exa rate limit hit")
+        response.raise_for_status()
+    except httpx.RequestError as e:
+        error_logger.error(f"Exa search failed: {e}")
+        return []
+    except RateLimitError as e:
+        error_logger.error(str(e))
+        return []
+
+    try:
+        data = response.json()
+    except json.JSONDecodeError as e:
+        error_logger.error(f"Exa returned invalid JSON: {e}")
+        return []
+
+    results = []
+    for item in data.get("results", [])[:count]:
+        url = item.get("url", "")
+        if not url:
+            continue
+        highlights = item.get("highlights") or []
+        snippet = highlights[0] if highlights else (item.get("text") or "")
+        results.append({
+            "title": item.get("title", "") or url,
+            "url": url,
+            "snippet": (snippet or "").strip()[:500],
+            "age": item.get("publishedDate", "") or "",
+        })
+
+    logger.info(f"Exa returned {len(results)} results")
     return results
