@@ -81,6 +81,11 @@ DEFAULT_SETTINGS = {
     "tavily_api_key": "",
     "serper_api_key": "",
     "exa_api_key": "",
+    "firecrawl_api_key": "",
+    # Page-content extractor: "auto" (built-in BS4, Firecrawl rescue for
+    # JS-rendered / thin pages), "firecrawl" (always Firecrawl first), or
+    # "builtin" (never call Firecrawl). Needs firecrawl_api_key for the first two.
+    "content_extractor": "auto",
     "research_endpoint_id": "",
     "research_model": "",
     "research_search_provider": "",

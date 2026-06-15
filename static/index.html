@@ -1486,6 +1486,18 @@
                 </select>
               </div>
               <div class="settings-row">
+                <label class="settings-label">Page Extract</label>
+                <select id="set-contentExtractor" class="settings-select" style="width:240px;">
+                  <option value="auto">Auto — Firecrawl rescues JS/thin pages</option>
+                  <option value="firecrawl">Always Firecrawl</option>
+                  <option value="builtin">Built-in only</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Firecrawl Key</label>
+                <input id="set-firecrawlKey" type="password" placeholder="fc-… clean page extraction" class="settings-select" style="width:240px;" autocomplete="off">
+              </div>
+              <div class="settings-row">
                 <label class="settings-label">Max Tokens</label>
                 <input id="set-researchMaxTokens" type="text" inputmode="numeric" placeholder="8192 (default)" class="settings-select" style="width:120px;">
               </div>

@@ -1410,6 +1410,8 @@ async function initResearchSettings() {
   var extractTimeoutInput = el('set-researchExtractTimeout');
   var extractConcurrencyInput = el('set-researchExtractConcurrency');
   var runTimeoutInput = el('set-researchRunTimeout');
+  var extractorSel = el('set-contentExtractor');
+  var firecrawlInput = el('set-firecrawlKey');
   var msg = el('set-researchMsg');
   var endpoints = [];
 
@@ -1435,6 +1437,8 @@ async function initResearchSettings() {
     if (settings.research_run_timeout_seconds !== undefined && settings.research_run_timeout_seconds !== null) {
       runTimeoutInput.value = settings.research_run_timeout_seconds;
     }
+    if (extractorSel && settings.content_extractor) extractorSel.value = settings.content_extractor;
+    if (firecrawlInput && settings.firecrawl_api_key) firecrawlInput.value = settings.firecrawl_api_key;
   } catch (e) { console.warn('Failed to load research settings', e); }
 
   function showStatus() {
@@ -1487,6 +1491,8 @@ async function initResearchSettings() {
         payload.research_run_timeout_seconds = rt;
       }
     }
+    if (extractorSel) payload.content_extractor = extractorSel.value;
+    if (firecrawlInput) payload.firecrawl_api_key = firecrawlInput.value.trim();
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -1506,6 +1512,8 @@ async function initResearchSettings() {
   extractTimeoutInput.addEventListener('change', saveResearch);
   extractConcurrencyInput.addEventListener('change', saveResearch);
   runTimeoutInput.addEventListener('change', saveResearch);
+  if (extractorSel) extractorSel.addEventListener('change', saveResearch);
+  if (firecrawlInput) firecrawlInput.addEventListener('change', saveResearch);
 
   _registerAiEndpointRefresh(function(nextEndpoints) {
     endpoints = nextEndpoints;

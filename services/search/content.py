@@ -9,7 +9,7 @@ import re
 import logging
 import socket
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -220,6 +220,87 @@ def _empty_result(url: str, error: str = "") -> dict:
 
 
 # ----------------------------------------------------------------------
+# Firecrawl content extractor (clean markdown for JS-heavy / thin pages)
+# ----------------------------------------------------------------------
+def _load_settings() -> dict:
+    """Return admin settings, or an empty dict if unavailable."""
+    try:
+        from src.settings import load_settings
+        return load_settings()
+    except Exception:
+        return {}
+
+
+def _firecrawl_key() -> str:
+    """Firecrawl API key from settings, falling back to FIRECRAWL_API_KEY env."""
+    val = (_load_settings().get("firecrawl_api_key") or "").strip()
+    return val or (os.environ.get("FIRECRAWL_API_KEY") or "").strip()
+
+
+def _content_extractor_mode() -> str:
+    """How to extract page content: 'auto' (built-in first, Firecrawl rescue for
+    JS/thin pages), 'firecrawl' (always Firecrawl first), or 'builtin'."""
+    mode = (_load_settings().get("content_extractor") or "auto").strip().lower()
+    return mode if mode in ("auto", "firecrawl", "builtin") else "auto"
+
+
+def _firecrawl_scrape(url: str, timeout: int = 20) -> Optional[dict]:
+    """Scrape a public URL to clean markdown via Firecrawl v2. Returns a result
+    dict in the same shape as fetch_webpage_content, or None on any failure so
+    callers transparently fall back to the built-in extractor. Never sends
+    private/internal URLs to Firecrawl (same SSRF guard as the built-in fetch)."""
+    key = _firecrawl_key()
+    if not key or not _public_http_url(url):
+        return None
+    fc_timeout = min(max(int(timeout or 20), 20), 120)
+    try:
+        resp = httpx.post(
+            "https://api.firecrawl.dev/v2/scrape",
+            json={
+                "url": url,
+                "formats": ["markdown"],
+                "onlyMainContent": True,
+                "timeout": fc_timeout * 1000,
+            },
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            timeout=fc_timeout + 5,
+        )
+        if resp.status_code == 429:
+            logger.info("Firecrawl rate limit hit for %s; using built-in extractor", url)
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.info("Firecrawl scrape failed for %s: %s", url, e)
+        return None
+    if not isinstance(data, dict) or not data.get("success"):
+        return None
+    payload = data.get("data") or {}
+    markdown = (payload.get("markdown") or "").strip()
+    if not markdown:
+        return None
+    meta = payload.get("metadata") or {}
+    title = meta.get("title") or ""
+    if isinstance(title, list):
+        title = title[0] if title else ""
+    return {
+        "url": meta.get("sourceURL") or meta.get("url") or url,
+        "title": title or url,
+        "content": markdown,
+        "lists": [],
+        "tables": [],
+        "code_blocks": [],
+        "meta_description": (meta.get("description") or ""),
+        "meta_keywords": "",
+        "js_rendered": False,
+        "js_message": "",
+        "success": True,
+        "error": "",
+        "extractor": "firecrawl",
+    }
+
+
+# ----------------------------------------------------------------------
 # Main content fetcher
 # ----------------------------------------------------------------------
 def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) -> dict:
@@ -243,6 +324,20 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) ->
             logger.warning(f"Failed to read content cache for {url}: {e}")
             cache_file.unlink(missing_ok=True)
             content_cache_index.pop(cache_key, None)
+
+    # Pick the extractor. Firecrawl (clean markdown, renders JS) when configured;
+    # otherwise the built-in httpx+BeautifulSoup path below. "firecrawl" mode
+    # tries it first for every page; "auto" lets the built-in run and only calls
+    # Firecrawl to rescue JS-shell / thin pages (cheaper). _public_http_url keeps
+    # internal URLs from ever reaching Firecrawl.
+    _fc_mode = _content_extractor_mode()
+    _fc_key = _firecrawl_key()
+    _fc_ok = bool(_fc_key) and _public_http_url(url)
+    if _fc_ok and _fc_mode == "firecrawl":
+        _fc = _firecrawl_scrape(url, timeout)
+        if _fc and _fc.get("success") and _fc.get("content"):
+            _cache_result(cache_file, cache_key, _fc, url)
+            return _fc
 
     # Fetch
     try:
@@ -355,6 +450,15 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) ->
         "success": True,
         "error": "",
     }
+    # Auto mode: if the built-in extraction looks weak (JS shell or thin), let
+    # Firecrawl re-scrape and keep whichever returned more usable content.
+    if _fc_ok and _fc_mode == "auto" and (
+        js_rendered or len(result.get("content") or "") < THIN_CONTENT_CHARS
+    ):
+        _fc = _firecrawl_scrape(url, timeout)
+        if _fc and _fc.get("success") and len(_fc.get("content") or "") > len(result.get("content") or ""):
+            _cache_result(cache_file, cache_key, _fc, url)
+            return _fc
     _cache_result(cache_file, cache_key, result, url)
     return result
 
