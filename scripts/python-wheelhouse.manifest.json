@@ -120,9 +120,9 @@
       "sha256": "3b41e1b601234296b4fb368338fdcd3e13e0b4fb5b67345948f4f2bf9868b286"
     },
     {
-      "filename": "fastapi-0.136.3-py3-none-any.whl",
-      "size": 117481,
-      "sha256": "3d2a69bdf04b7e9f3afa292c3bc7a98816bbfafa10bc9b45f3f3700d2f761620"
+      "filename": "fastapi-0.137.1-py3-none-any.whl",
+      "size": 121877,
+      "sha256": "64f6983c59e45c4b9fdc44e57cb8035c2451ee91ea8e8ec042aca37de7cf6b69"
     },
     {
       "filename": "fastembed-0.8.0-py3-none-any.whl",
@@ -205,9 +205,9 @@
       "sha256": "649aad558df211bc50ca3dea3646e1b2f3e93f0995bca2b6358e9c79031471b6"
     },
     {
-      "filename": "icalendar-7.1.2-py3-none-any.whl",
-      "size": 474031,
-      "sha256": "01c76243c76c549f58bb51510a8f0a4edb7c539726adda1356dfd0dc04fb7a53"
+      "filename": "icalendar-7.1.3-py3-none-any.whl",
+      "size": 475481,
+      "sha256": "690f30aa50a76cbf854db5ad52654705db9c5cd0e1b152222f5d4b7854b60667"
     },
     {
       "filename": "idna-3.18-py3-none-any.whl",
@@ -530,9 +530,9 @@
       "sha256": "e7e6b0769c8f51ed59acab6e994b00621096cfb1c640a7509295987388fbaf65"
     },
     {
-      "filename": "sqlalchemy-2.0.50-cp312-cp312-win_amd64.whl",
-      "size": 2146186,
-      "sha256": "9d1af51558029a156a70986b7df88f042b3d158d7c8d8fb5072912d4b32d89c7"
+      "filename": "sqlalchemy-2.0.51-cp312-cp312-win_amd64.whl",
+      "size": 2146670,
+      "sha256": "2cf39aabdf48e87c1c2c2ed6d20d33ffa0733b3071ce9c5f66357947dd009080"
     },
     {
       "filename": "sse_starlette-3.4.4-py3-none-any.whl",
