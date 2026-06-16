@@ -72,7 +72,7 @@ async def test_fetch_and_extract_uses_configured_timeout(monkeypatch):
         extraction_timeout=123,
     )
 
-    async def fake_llm(messages, temperature=0.3, max_tokens=4096, timeout=60):
+    async def fake_llm(messages, temperature=0.3, max_tokens=4096, timeout=60, think=None):
         captured["timeout"] = timeout
         return json.dumps({
             "rational": "relevant",
@@ -108,7 +108,7 @@ async def test_planning_and_query_generation_use_configured_timeouts():
     )
     captured = []
 
-    async def fake_llm(messages, temperature=0.3, max_tokens=4096, timeout=60):
+    async def fake_llm(messages, temperature=0.3, max_tokens=4096, timeout=60, think=None):
         captured.append(timeout)
         if max_tokens == 1024:
             return json.dumps({

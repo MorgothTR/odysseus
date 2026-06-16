@@ -418,8 +418,15 @@ class DeepResearcher:
     # LLM helper
     # ------------------------------------------------------------------
     async def _llm(self, messages: List[Dict], temperature: float = 0.3,
-                   max_tokens: int = 4096, timeout: int = 60) -> str:
-        """Call the LLM asynchronously and strip thinking tags."""
+                   max_tokens: int = 4096, timeout: int = 60,
+                   think: Optional[bool] = None) -> str:
+        """Call the LLM asynchronously and strip thinking tags.
+
+        ``think=False`` disables a reasoning model's hidden thinking — pass it on
+        structured extraction steps (planning, classification, query generation)
+        so a thinking model like kimi spends its budget on the visible JSON
+        answer instead of burning it on reasoning and returning nothing.
+        """
         from src.llm_core import llm_call_async
         response = await llm_call_async(
             url=self.llm_endpoint,
@@ -429,6 +436,7 @@ class DeepResearcher:
             max_tokens=max_tokens,
             headers=self.llm_headers,
             timeout=timeout,
+            think=think,
         )
         return strip_thinking(response)
 
@@ -444,6 +452,7 @@ class DeepResearcher:
                 temperature=0.3,
                 max_tokens=1024,
                 timeout=getattr(self, "planning_timeout", 90),
+                think=False,
             )
             # Try to parse as JSON for structured plan
             parsed = self._parse_json_object(response)
@@ -475,7 +484,7 @@ class DeepResearcher:
         try:
             result = await self._llm(
                 [{"role": "user", "content": prompt}],
-                temperature=0, max_tokens=20, timeout=15,
+                temperature=0, max_tokens=20, timeout=15, think=False,
             )
             cat = (result or "").strip().lower()
             # Clean one-word answer first.
@@ -528,6 +537,7 @@ class DeepResearcher:
                 temperature=0.5,
                 max_tokens=4096,
                 timeout=getattr(self, "query_timeout", 120),
+                think=False,
             )
             queries = self._parse_json_array(response)
             # Deduplicate
