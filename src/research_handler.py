@@ -703,10 +703,15 @@ class ResearchHandler:
                 model=model,
                 messages=[{"role": "user", "content": "hi"}],
                 temperature=0,
-                max_tokens=5,
+                # A liveness probe needs one visible token, not reasoning. Without
+                # think=False a thinking model (e.g. kimi-k2.6) spends the whole
+                # tiny budget on hidden reasoning and returns no content, which
+                # llm_core raises as a 502 — aborting research before it starts.
+                max_tokens=16,
                 headers=headers,
                 timeout=15,
                 max_retries=1,
+                think=False,
             )
             logger.info(f"Endpoint probe OK: {model}")
         except Exception as e:
