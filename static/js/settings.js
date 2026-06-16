@@ -1065,7 +1065,7 @@ var _searchProviderHints = {
   google_pse: 'Requires a Google API key and a Programmable Search Engine ID (CX). Create one at programmablesearchengine.google.com',
   tavily: 'AI-optimized search. 1,000 free credits/month at tavily.com',
   serper: 'Google results via API. 2,500 free queries at serper.dev',
-  exa: 'Neural, research-grade search — best for deep research. 1,000 free requests/month + signup credit at exa.ai',
+  exa: 'Neural, research-grade search — best for deep research. Once a key is set, Exa is also used automatically as the fallback even if another provider is primary. 1,000 free requests/month + signup credit at exa.ai',
   disabled: 'Web search and deep research tools will be unavailable.',
 };
 var _searchNeedsKey = { brave: 1, google_pse: 1, tavily: 1, serper: 1, exa: 1 };

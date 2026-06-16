@@ -120,13 +120,25 @@ _FALLBACK_ORDER = ["duckduckgo"]
 
 
 def _build_provider_chain(primary: str) -> List[str]:
-    """Build ordered list: primary first, then configured/default fallbacks."""
+    """Build ordered list: primary first, then configured/default fallbacks.
+
+    When no explicit fallback chain is set, prefer Exa (research-grade) over
+    DuckDuckGo as the default fallback whenever an Exa key is configured, so a
+    dead/empty primary (e.g. the no-Docker SearXNG default) falls back to Exa
+    automatically — the user gets research-grade search without selecting Exa as
+    the provider. An explicit ``search_fallback_chain`` still wins.
+    """
     chain = [primary]
     settings = _get_search_settings()
     user_chain = settings.get("search_fallback_chain") or []
     if isinstance(user_chain, str):
         user_chain = [s.strip() for s in user_chain.split(",") if s.strip()]
-    fallbacks = user_chain if user_chain else _FALLBACK_ORDER
+    if user_chain:
+        fallbacks = user_chain
+    elif _get_provider_key("exa"):
+        fallbacks = ["exa", "duckduckgo"]
+    else:
+        fallbacks = _FALLBACK_ORDER
     for fb in fallbacks:
         if fb and fb != primary and fb not in chain and fb != "disabled":
             chain.append(fb)
