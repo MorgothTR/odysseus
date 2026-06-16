@@ -689,6 +689,7 @@ class DeepResearcher:
                 temperature=0.2,
                 max_tokens=2048,
                 timeout=self.extraction_timeout,
+                think=False,
             )
             parsed = self._parse_json_object(response)
             if parsed:
@@ -765,6 +766,7 @@ class DeepResearcher:
                 [{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=128,
+                think=False,
             )
             # Reasoning models prepend a <think>...</think> block — strip it
             # before checking for YES/NO, otherwise the answer always looks
